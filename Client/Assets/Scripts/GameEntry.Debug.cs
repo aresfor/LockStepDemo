@@ -1,7 +1,8 @@
-﻿namespace DefaultNamespace
-{
-    public class GameEntry_Debug
+﻿
+    public partial class GameEntry
     {
-        
+        public static void ClearScreenLog()
+        {
+            Instance.GetComponent<ConsoleToScreen>().ClearLog();
+        }
     }
-}

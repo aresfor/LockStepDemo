@@ -44,7 +44,7 @@ namespace Lockstep.Math {
             this._val = (int)(val * LFloat.Precision);
         }
 
-        #if UNITY_EDITOR
+        //#if UNITY_EDITOR
         /// <summary>
         /// 直接使用浮点型 进行构造 警告!!! 仅应该在Editor模式下使用，不应该在正式代码中使用,避免出现引入浮点的不确定性
         /// </summary>
@@ -52,7 +52,7 @@ namespace Lockstep.Math {
         {
             this._val = (int)(val * LFloat.Precision);
         }
-        #endif
+        //#endif
 
         #region override operator 
 

@@ -1,16 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using DisruptorUnity3d;
 using ENet;
+using Lockstep.Logic;
 using UnityEngine;
 using Event = ENet.Event;
 using EventType = ENet.EventType;
 
 public class Server
 {
-    public int MaxPlayers = 2;
-    public int MaxPeers => MaxPlayers * 2;
+
     private Host m_HostServer;
     private Thread m_NetThread;
     private Address m_Address;
@@ -18,13 +20,29 @@ public class Server
     private readonly RingBuffer<EServerNetThreadResponse> m_Responses = new RingBuffer<EServerNetThreadResponse>(8);
     private readonly RingBuffer<FDisconnectData> m_DisconnectData = new RingBuffer<FDisconnectData>(128);
     private readonly RingBuffer<FReceivedEvent> m_ReceivedEvents = new RingBuffer<FReceivedEvent>(1024);
+    private readonly RingBuffer<FSendData> m_SendData = new RingBuffer<FSendData>(1024);
+    
+    private readonly PacketFreeCallback m_FreeCallback = packet => { Marshal.FreeHGlobal(packet.Data); };
+    private readonly IntPtr             m_CachedFreeCallback;
+
+    
     private ServerCommandHandler m_CommandHandler;
 
     public EServerState State = EServerState.Stopped;
-    public readonly HashSet<Peer> ConnectedPeers = new HashSet<Peer>();
+    //@TODO: 封装到房间中
+    public readonly Dictionary<uint, Peer> Id2ConnectedPeers = new Dictionary<uint, Peer>();
+    public Dictionary<uint, PlayerServerInfo> Id2PlayerInfos = new Dictionary<uint, PlayerServerInfo>();
+    public Dictionary<string, PlayerServerInfo> Name2PlayerInfos = new Dictionary<string, PlayerServerInfo>();
+    private bool m_GameStarted = false;
+    
+    private Dictionary<int, PlayerInput[]> m_Tick2Inputs = new Dictionary<int, PlayerInput[]>();
+    private Dictionary<int, int[]> m_Tick2Hashes = new Dictionary<int, int[]>();
+    private int m_CurTick;
     public Server()
     {
         m_CommandHandler = new ServerCommandHandler(this);
+        m_CachedFreeCallback = Marshal.GetFunctionPointerForDelegate(m_FreeCallback);
+
     }
 
     public void CancelStartServer()
@@ -34,10 +52,12 @@ public class Server
             Debug.Log($"CancelStartServer fail, current state is {State}");
             return;
         }
+
         Debug.Log("CancelStartServer");
         State = EServerState.Stopping;
         EnqueueRequest(EServerNetThreadRequest.Stop);
     }
+
     public void StopServer()
     {
         if (State != EServerState.Working)
@@ -48,24 +68,121 @@ public class Server
 
         Debug.Log("Stop Server");
         State = EServerState.Stopping;
-        
-        foreach (var connectedPeer in ConnectedPeers)
+
+        foreach (var connectedPeer in Id2ConnectedPeers.Values)
         {
             m_DisconnectData.Enqueue(new FDisconnectData()
             {
-                Peer =  connectedPeer
+                Peer = connectedPeer
             });
         }
+
         EnqueueRequest(EServerNetThreadRequest.Stop);
     }
 
     public void ClearBuffers()
     {
         //@TODO: 清理服务器相关数据
-        ConnectedPeers.Clear();
+        Id2ConnectedPeers.Clear();
     }
 
-    public void Execute()
+    public void ServerStartGame()
+    {
+        OnStartGame(new Msg_StartGame());
+    }
+    
+    public void OnStartGame(IMessage message)
+    {
+        Debug.Log("Server StartGame");
+        m_GameStarted = true;
+
+        Msg_StartGame msgStartGame = message as Msg_StartGame;
+        //@TODO:
+        msgStartGame.mapId = 0;
+        msgStartGame.playerInfos = Id2PlayerInfos.Values.ToArray();
+
+        var bytes = msgStartGame.ToBytes();
+        
+        Debug.Log($"Server broadcast startGame, size(totalSize - 4): {bytes.Length}");
+
+        int playerLocalId = 0;
+        foreach (var playerServerInfo in Id2PlayerInfos.Values)
+        {
+            //@TODO:
+            ++playerLocalId;
+            msgStartGame.localPlayerId = playerLocalId; 
+            var newPtr = MessagePacker.Instance.GetBytesPtr(msgStartGame.OpCode, bytes, out var totalLength);
+
+            FSendData sendData = new FSendData()
+            {
+                Data = newPtr,
+                Length = totalLength,
+                Peer = sendData.Peer = Id2ConnectedPeers[playerServerInfo.id]
+            };
+            EnqueueSendData(sendData);
+        }
+        
+        //@TODO: endgame之后要设置m_GameStarted为false等
+    }
+    
+    
+    public void OnPlayerInput(Peer peer, IMessage message)
+    {
+        Msg_PlayerInput msgPlayerInput = message as Msg_PlayerInput;
+
+        PlayerServerInfo playerInfo = Id2PlayerInfos[peer.ID];
+        PlayerInput[] playerInputs = null;
+        if (!m_Tick2Inputs.TryGetValue(msgPlayerInput.Tick, out playerInputs))
+        {
+            //当前玩家所有输入而不是所有玩家
+            playerInputs = new PlayerInput[Id2PlayerInfos.Count];
+            m_Tick2Inputs.Add(msgPlayerInput.Tick, playerInputs);
+        }
+
+        playerInputs[playerInfo.id] = msgPlayerInput.PlayerInput;
+        CheckInput();
+    }
+
+    public void OnPlayerHash(Peer peer, IMessage message)
+    {
+        Msg_PlayerHash msgPlayerHash = message as Msg_PlayerHash;
+        
+        int[] hashes;
+        if (!m_Tick2Hashes.TryGetValue(msgPlayerHash.Tick, out hashes))
+        {
+            hashes = new int[Id2PlayerInfos.Count];
+            m_Tick2Hashes.Add(msgPlayerHash.Tick, hashes);
+        }
+        //@TODO: 先获取localid然后进行存入
+        hashes[peer.ID] = msgPlayerHash.Hash;
+        
+        //hash还没全部到齐，退出检查
+        foreach (int hash in hashes)
+        {
+            if (hash == 0)
+                return;
+        }
+
+        bool checkPass = true;
+        int compareValue = hashes[0];
+        foreach (int hash in hashes)
+        {
+            if (hash != compareValue)
+            {
+                checkPass = false;
+                break;
+            }
+        }
+
+        if (false == checkPass)
+        {
+            Debug.Log(msgPlayerHash.Tick + " Hash is different " + compareValue);
+        }
+
+        m_Tick2Hashes.Remove(msgPlayerHash.Tick);
+    }
+
+    public void Execute(float deltaTime)
     {
         while (m_Responses.TryDequeue(out var response))
             switch (response)
@@ -98,34 +215,102 @@ public class Server
 
         if (State != EServerState.Working) return;
         while (m_ReceivedEvents.TryDequeue(out var @event))
-            unsafe
+        {
+            switch (@event.EventType)
             {
-                switch (@event.EventType)
-                {
-                    case EventType.Connect:
-                        m_CommandHandler.OnClientConnected(@event.Peer);
-                        break;
-                    case EventType.Disconnect:
-                        m_CommandHandler.OnClientDisconnected(@event.Peer);
-                        break;
-                    case EventType.Receive:
-                        var currentPeerId = (ushort)@event.Peer.ID;
-                        m_CommandHandler.CurrentClientPeerID = currentPeerId;
-                        Debug.LogError("Receive EventType not implement");
-                        
-                        break;
-                    case EventType.Timeout:
-                        m_CommandHandler.OnClientDisconnected(@event.Peer);
-                        break;
-                }
+                case EventType.Connect:
+                    m_CommandHandler.OnClientConnected(@event.Peer);
+                    break;
+                case EventType.Disconnect:
+                    m_CommandHandler.OnClientDisconnected(@event.Peer);
+                    break;
+                case EventType.Receive:
+                    // var currentPeerId = (ushort)@event.Peer.ID;
+                    // m_CommandHandler.CurrentClientPeerID = currentPeerId;
+                    //所有消息处理入口，游戏开始，结束，加入房间，输入..
+                    m_CommandHandler.OnReceive(ref @event);
+                    break;
+                case EventType.Timeout:
+                    m_CommandHandler.OnClientDisconnected(@event.Peer);
+                    break;
             }
+        }
+
+        OnExecute(deltaTime);
+
     }
 
+
+    private void OnExecute(float deltaTime)
+    {
+        if (!m_GameStarted)
+            return;
+        CheckInput();
+
+    }
+
+    private void CheckInput()
+    {
+        if (m_Tick2Inputs.TryGetValue(m_CurTick, out PlayerInput[] playerInputs))
+        {
+            if (playerInputs != null)
+            {
+                bool isFullInput = true;
+                for (int i = 0; i < playerInputs.Length; ++i)
+                {
+                    if (playerInputs[i] == null)
+                    {
+                        isFullInput = false;
+                        break;
+                    }
+                }
+
+                if (isFullInput)
+                {
+                    BoardInputMsg(m_CurTick, playerInputs);
+                    m_Tick2Inputs.Remove(m_CurTick);
+                    ++m_CurTick;
+                }
+            }
+            
+        }
+    }
+    private void BoardInputMsg(int tick, PlayerInput[] inputs){
+        var frame = new Msg_FrameInput();
+        frame.Input = new FrameInput() {
+            tick = tick,
+            inputs = inputs
+        };
+        
+        var bytes = frame.ToBytes();
+        Debug.Log($"server broad input, size(totalSize - 4): {bytes.Length}");
+
+        foreach (var playerServerInfo in Id2PlayerInfos.Values)
+        {
+            IntPtr data = MessagePacker.Instance.GetBytesPtr(frame.OpCode, bytes, out var totalLength);
+            FSendData sendData = new FSendData()
+            {
+                Data = data,
+                Length = totalLength,
+                Peer = Id2ConnectedPeers[playerServerInfo.id]
+            };
+            EnqueueSendData(sendData);
+        }
+
+    }
     
     private void NetworkThread()
     {
         while (true)
         {
+            while (m_SendData.TryDequeue(out var data))
+            {
+                var packet = new Packet();
+                packet.Create(data.Data, data.Length, PacketFlags.Reliable | PacketFlags.NoAllocate);
+                packet.SetFreeCallback(m_CachedFreeCallback);
+                data.Peer.Send(0, ref packet);
+            }
+            
             while (m_DisconnectData.TryDequeue(out var data)) data.Peer.DisconnectNow(0);
 
             while (m_Requests.TryDequeue(out var request))
@@ -134,12 +319,13 @@ public class Server
                     case EServerNetThreadRequest.Start:
                         try
                         {
-                            m_HostServer.Create(m_Address, MaxPeers, 2);
+                            m_HostServer.Create(m_Address, GameEntry.Instance.MaxPeers, GameEntry.Instance.MaxChannels);
+                            //m_HostServer.Create();
                             m_Responses.Enqueue(EServerNetThreadResponse.StartSuccess);
                         }
                         catch (Exception e)
                         {
-                            Debug.Log(e.Message);
+                            Debug.LogError(e.Message);
                             m_HostServer = new Host();
                             m_Responses.Enqueue(EServerNetThreadResponse.StartFailure);
                         }
@@ -194,10 +380,25 @@ public class Server
                             break;
 
                         case EventType.Receive:
-                            Debug.LogError("Receive EventType not implement");
+                            //Debug.LogError("Receive EventType not implement");
                             Debug.Log("Packet received from - ID: " + netEvent.Peer.ID + ", IP: " + netEvent.Peer.IP +
                                       ", Channel ID: " + netEvent.ChannelID + ", Data length: " +
                                       netEvent.Packet.Length);
+                            
+                            unsafe
+                            {
+                                var length = @netEvent.Packet.Length;
+                                var newPtr = Marshal.AllocHGlobal(length);
+                                Buffer.MemoryCopy(@netEvent.Packet.Data.ToPointer(), newPtr.ToPointer(), length,
+                                    length);
+                                m_ReceivedEvents.Enqueue(new FReceivedEvent()
+                                {
+                                    Data = newPtr,
+                                    EventType = EventType.Receive,
+                                    Peer = netEvent.Peer
+                                });
+                            }
+                            
                             netEvent.Packet.Dispose();
                             break;
                     }
@@ -214,6 +415,11 @@ public class Server
     {
         m_DisconnectData.Enqueue(data);
     }
+    public void EnqueueSendData(FSendData data)
+    {
+        m_SendData.Enqueue(data);
+    }
+    
 
     public Thread StartServer(string ip, ushort port)
     {

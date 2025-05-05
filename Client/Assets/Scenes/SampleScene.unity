@@ -320,6 +320,8 @@ GameObject:
   - component: {fileID: 1125495365}
   - component: {fileID: 1125495364}
   - component: {fileID: 1125495366}
+  - component: {fileID: 1125495368}
+  - component: {fileID: 1125495367}
   m_Layer: 0
   m_Name: GameEntry
   m_TagString: Untagged
@@ -339,9 +341,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97f930dde3184cb299986cb492e2e3dc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  IsClientMode: 0
+  IsReplayMode: 0
   IP: localhost
   Port: 9500
   Step: 15
+  MaxPlayers: 10
+  MaxChannels: 10
+  RecordFilePath: Recorder/0.bytes
+  PlayerServerInfos: []
+  ClientPlayerInfo:
+    name: 
+    id: 0
+    localId: 0
+    initPos:
+      _x: 0
+      _y: 0
+      _z: 0
+    initDeg:
+      _val: 0
+    PrefabId: 0
 --- !u!4 &1125495365
 Transform:
   m_ObjectHideFlags: 0
@@ -364,12 +383,48 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1125495363}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5a702c896a1c234418e7024655c83792, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   fontSize: 100
+--- !u!114 &1125495367
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1125495363}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 261434ac9ad5428088bf09ac85772b3d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &1125495368
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1125495363}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1b7b2d23da014c49bfc4b675f89e55ae, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  floorMask: 0
+  camRayLength: 100
+  hasHitFloor: 0
+  mousePos:
+    _x: 0
+    _y: 0
+  mouseUV:
+    _x: 0
+    _y: 0
+  isInputFire: 0
+  skillId: 0
+  isSprint: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

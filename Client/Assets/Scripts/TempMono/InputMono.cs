@@ -2,31 +2,32 @@ using Lockstep.Collision2D;
 using Lockstep.Logic;
 using Lockstep.Math;
 using UnityEngine;
+using UnityEngine.Serialization;
 using Debug = Lockstep.Logging.Debug;
 
 namespace LockstepTutorial {
 
     public class InputMono : UnityEngine.MonoBehaviour {
-        private static bool IsReplay => GameManager.Instance.IsReplay;
+        private static bool IsReplayMode => GameEntry.Instance.IsReplayMode;
         [HideInInspector] public int floorMask;
         public float camRayLength = 100;
 
         public bool hasHitFloor;
         public LVector2 mousePos;
-        public LVector2 inputUV;
+        public LVector2 mouseUV;
         public bool isInputFire;
         public int skillId;
-        public bool isSpeedUp;
+        public bool isSprint;
 
         void Start(){
             floorMask = LayerMask.GetMask("Floor");
         }
 
         public void Update(){
-            if (!IsReplay) {
+            if (!IsReplayMode) {
                 float h = Input.GetAxisRaw("Horizontal");
                 float v = Input.GetAxisRaw("Vertical");
-                inputUV = new LVector2(h.ToLFloat(), v.ToLFloat());
+                mouseUV = new LVector2(h.ToLFloat(), v.ToLFloat());
 
                 isInputFire = Input.GetButton("Fire1");
                 hasHitFloor = Input.GetMouseButtonDown(1);
@@ -45,13 +46,12 @@ namespace LockstepTutorial {
                     }
                 }
 
-                isSpeedUp = Input.GetKeyDown(KeyCode.Space);
-                GameManager.CurGameInput =  new PlayerInput() {
-                    mousePos = mousePos,
-                    inputUV = inputUV,
-                    isInputFire = isInputFire,
-                    skillId = skillId,
-                    isSpeedUp = isSpeedUp,
+                isSprint = Input.GetKeyDown(KeyCode.Space);
+                GameEntry.CurGameInput =  new PlayerInput() {
+                    MousePos = mousePos,
+                    InputUV = mouseUV,
+                    IsSprint = isSprint,
+                    IsFire = isInputFire
                 };
                 
             }

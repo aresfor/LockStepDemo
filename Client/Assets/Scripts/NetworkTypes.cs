@@ -77,6 +77,13 @@ public struct FReceivedEvent
     public Peer      Peer;
     public IntPtr    Data;
 }
+
+public struct FSendData
+{
+    public Peer   Peer;
+    public IntPtr Data;
+    public int    Length;
+}
 #endregion
 
 
