@@ -28,40 +28,51 @@ public class Client
     public Peer ConnectedServerPeer;
     public EClientState State = EClientState.Disconnected;
     
-    //@TODO：封装到房间中
-    public PlayerServerInfo[] PlayerServerInfos;
-    public Player[] Players;
-    public List<FrameInput> Frames = new List<FrameInput>();
+    
 
     public int PreSendInputCount { get; private set; } = 2;
     public int InputTick { get; private set; } = 0;
     public int InputTargetTick => m_TickSinceGameStart + PreSendInputCount;
-
     
-    public int MaxServerFrameIndex { get; private set; }
     
     /// game init timestamp
     private long m_GameStartTimestampMs = -1;
 
     private int m_TickSinceGameStart;
-    /// frame count that need predict(TODO should change according current network's delay)
+    /// frame count that need predict(TODO should change according current network's delay)，这个和framebuffer中的maxclientpredictframecount不一样，两边单独分开判断
     public int FramePredictCount = 0;//~~~
     public int TargetTick => m_TickSinceGameStart + FramePredictCount;
 
+    #region 房间/游戏变量
+
+    //@TODO：封装到房间中
+    public PlayerServerInfo[] PlayerServerInfos;
+    public Player[] Players;
+    
+    //public List<FrameInput> Frames = new List<FrameInput>();
+    
+    //服务器发送开始游戏的时候，每个玩家的localid都是不同的，具体对应服务器上玩家数组的索引
     private int m_LocalPlayerId;
     
     private bool m_GameStarted = false;
+
+    #endregion
+
+    private FrameBuffer m_FrameBuffer;
+    
     public Client()
     {
         m_CommandHandler = new ClientCommandHandler(this);
         m_CachedFreeCallback = Marshal.GetFunctionPointerForDelegate(m_FreeCallback);
     }
 
-    public Thread StartClient(Host host, Address address)
+    public Thread StartClient(Host host, Address address, int bufferCapacity)
     {
         m_HostClient = host;
         m_HostClient.Create();
 
+        m_FrameBuffer = new FrameBuffer(bufferCapacity);
+        
         m_Address = address;
         State = EClientState.Connecting;
         EnqueueRequest(EClientNetThreadRequest.Connect);
@@ -128,29 +139,68 @@ public class Client
 
     public void OnUpdate(float deltaTime)
     {
-        // m_TickSinceGameStart =
-        //     (int) ((LTime.realtimeSinceStartupMS - m_GameStartTimestampMs)
-        //            / GameEntry.Instance.UpdateCallPerSecond);
-        //
-        // m_CommandBuffer.OnUpdate(deltaTime, GameEntry.CurTick);
-        //
-        // if (GameEntry.Instance.IsClientMode)
-        // {
-        //     OnUpdateClientMode();
-        // }
-        // else
-        // {
-        //     while (InputTick <= InputTargetTick)
-        //     {
-        //         SendInputs(InputTick);
-        //         ++InputTick;
-        //     }
-        //     OnUpdateInternal();
-        // }
+        m_TickSinceGameStart =
+            (int) ((LTime.realtimeSinceStartupMS - m_GameStartTimestampMs)
+                   / GameEntry.Instance.UpdateCallPerSecond);
+
+        m_FrameBuffer.OnUpdate(deltaTime, GameEntry.CurrentTick);
+        
+        if (GameEntry.Instance.IsClientMode)
+        {
+            OnUpdateClientMode();
+        }
+        else
+        {
+            while (InputTick <= InputTargetTick)
+            {
+                SendInputs(InputTick);
+                ++InputTick;
+            }
+            OnUpdateInternal();
+        }
     }
 
     private void SendInputs(int tick)
     {
+        //@TODO: 获取本地的完整输入，这里只是临时的，输入需要通过inputservice去获取
+        
+        //@TODO: pool
+        Msg_FrameInput msgframeInput = new Msg_FrameInput()
+        {
+            Input = new FrameInput()
+            {
+                inputs = new[]
+                {
+                    GameEntry.CurrentGameInput.Clone()
+                },
+                tick = tick
+            }
+        };
+
+        StepFrame stepFrame = new StepFrame(msgframeInput);
+        FillInputWithLastFrame(stepFrame);
+        m_FrameBuffer.EnqueueLocalFrame(stepFrame);
+        
+        //@TODO: 合并过去历史的输入为一个input包
+        if (tick > m_FrameBuffer.MaxServerTickInBuffer)
+        {
+            GameEntry.Instance.Tick2SendTimer[tick] = LTime.realtimeSinceStartupMS;
+            SendInput2Server();
+
+        }
+    }
+
+    public void FillInputWithLastFrame(StepFrame stepFrame)
+    {
+        int tick = stepFrame.Tick;
+        StepFrame lastFrame = m_FrameBuffer.GetFrame(tick - 1);
+        PlayerInput localPlayerInput = stepFrame.FrameInput.Input.inputs[m_LocalPlayerId];
+        for (int i = 0; i < Players.Length; ++i)
+        {
+            stepFrame.FrameInput.Input.inputs[i] = lastFrame.FrameInput.Input.inputs[i].Clone();
+        }
+
+        stepFrame.FrameInput.Input.inputs[m_LocalPlayerId] = localPlayerInput;
         
     }
 
@@ -169,20 +219,20 @@ public class Client
     
     private void OnUpdateClientMode()
     {
-        while (GameEntry.CurTick < TargetTick)
+        while (GameEntry.CurrentTick < TargetTick)
         {
             //FramePredictCount = 0;
             Msg_PlayerInput msgPlayerInput = new Msg_PlayerInput()
             {
-                PlayerInput = GameEntry.CurGameInput,
-                Tick = GameEntry.CurTick
+                PlayerInput = GameEntry.CurrentGameInput.Clone(),
+                Tick = GameEntry.CurrentTick
             };
             Msg_FrameInput msgFrameInput = new Msg_FrameInput()
             {
                 Input = new FrameInput()
                 {
                     inputs = new[] { msgPlayerInput.PlayerInput },
-                    tick = GameEntry.CurTick
+                    tick = GameEntry.CurrentTick
                 }
             };
             
@@ -208,7 +258,7 @@ public class Client
             SendInput2Server();
         }
         
-        if (GetFrame(GameEntry.CurTick) == null)
+        if (GetFrame(GameEntry.CurrentTick) == null)
             return;
 
         Step(deltaTime);
@@ -221,20 +271,23 @@ public class Client
         //@TODO: Replay JumpTp
         if (GameEntry.Instance.IsReplayMode)
         {
-            if (GameEntry.CurTick < Frames.Count)
+            if (GameEntry.CurrentTick < Frames.Count)
             {
                 Replay(deltaTime);
-                ++GameEntry.CurTick;
+                ++GameEntry.CurrentTick;
+                int nextClientTick = GameEntry.CurrentTick;
+                m_FrameBuffer.SetNextClientTick(nextClientTick);
             }
         }
         else
         {
             //send hash
-            DoStep(deltaTime);
+            StepInternal(deltaTime);
 
             SendHash2Server();
-            
-            ++GameEntry.CurTick;
+            ++GameEntry.CurrentTick;
+            int nextClientTick = GameEntry.CurrentTick;
+            m_FrameBuffer.SetNextClientTick(nextClientTick);
         }
     }
 
@@ -242,7 +295,7 @@ public class Client
     {
         Msg_PlayerHash playerHash = new Msg_PlayerHash();
         playerHash.Hash = GetHash();
-        playerHash.Tick = GameEntry.CurTick;
+        playerHash.Tick = GameEntry.CurrentTick;
         var bytes = playerHash.ToBytes();
         var data = MessagePacker.Instance.GetBytesPtr(playerHash.OpCode, bytes, out var totalLength);
         
@@ -276,10 +329,10 @@ public class Client
 
     private void Replay(float deltaTime)
     {
-        DoStep(deltaTime);
+        StepInternal(deltaTime);
     }
 
-    private void DoStep(float deltaTime)
+    private void StepInternal(float deltaTime)
     {
         LFloat deltaTimeF = deltaTime.ToLFloat();
 
@@ -289,10 +342,12 @@ public class Client
             player.Position += new LVector3(uv.x,LFloat.zero, uv.y) * deltaTimeF;
             player.Go.transform.position = player.Position.ToVector3();
         }
+        
+        
     }
     
     private void UpdateFrameInput(){
-        var curFrameInput = GetFrame(GameEntry.CurTick);
+        var curFrameInput = GetFrame(GameEntry.CurrentTick);
         for (int i = 0; i < Players.Length; i++) {
             Players[i].Input = curFrameInput.inputs[i];
         }
@@ -325,33 +380,12 @@ public class Client
         });
     }
 
-    public void SendInput2Server()
+    
+    //@TODO: 封装到net service中
+    public void SendInput2Server(StepFrame stepFrame)
     {
-        Msg_PlayerInput msgPlayerInput = new Msg_PlayerInput();
-        msgPlayerInput.PlayerInput = GameEntry.CurGameInput;
-        msgPlayerInput.Tick = InputTick;
-        
-        //客户端直接填充输入到自己
-        if (GameEntry.Instance.IsClientMode)
-        {
-            OnFrameInput(new Msg_FrameInput()
-            {
-                Input = new FrameInput()
-                {
-                    inputs = new []{GameEntry.CurGameInput},
-                    tick = InputTick
-                }
-            });
-            ++InputTick;
-
-            return;
-        }
-        if (InputTick > PreSendInputCount + MaxServerFrameIndex) {
-            return;
-        }
-        
-        var bytes = msgPlayerInput.ToBytes();
-        var data = MessagePacker.Instance.GetBytesPtr(msgPlayerInput.OpCode, bytes, out var totalLength);
+        var bytes = stepFrame.FrameInput.ToBytes();
+        var data = MessagePacker.Instance.GetBytesPtr(stepFrame.FrameInput.OpCode, bytes, out var totalLength);
         EnqueueSendData(new FSendData()
         {
             Data = data,
@@ -402,18 +436,18 @@ public class Client
         
         //@TODO: 本地模式实际上应该是模型加载完，关卡加载完之后再初始化时间
         //，而联机模式应该是等服务器第一个帧下发，放在了OnFrameInput中
-        // if (GameEntry.Instance.IsClientMode)
-        // {
-        //     m_GameStartTimestampMs = LTime.realtimeSinceStartupMS;
-        // }
-        // else
-        // {
-        //     while (InputTick < PreSendInputCount)
-        //     {
-        //         SendInputs(InputTick);
-        //         ++InputTick;
-        //     }
-        // }
+        if (GameEntry.Instance.IsClientMode)
+        {
+            m_GameStartTimestampMs = LTime.realtimeSinceStartupMS;
+        }
+        else
+        {
+            while (InputTick < PreSendInputCount)
+            {
+                SendInputs(InputTick);
+                ++InputTick;
+            }
+        }
         
     }
     
@@ -424,24 +458,14 @@ public class Client
         Msg_FrameInput msgFrameInput = message as Msg_FrameInput;
 
         FrameInput input = msgFrameInput.Input;
-        for (int i = Frames.Count; i <= input.tick; ++i)
-        {
-            Frames.Add(new FrameInput());
-        }
-        
-        // if (Frames.Count == 0) {
-        //     GameEntry.Instance.remainTime = 0;
-        // }
-        
-        MaxServerFrameIndex = Mathf.Max(input.tick, MaxServerFrameIndex);
-        
-        //延迟打印
-        if (GameEntry.Instance.Tick2SendTimer.TryGetValue(input.tick, out var val)) {
-            GameEntry.Delays.Add(Time.realtimeSinceStartup - val);
-        }
 
-        Frames[input.tick] = input;
+
+        //@TODO: pool
+        StepFrame stepFrame = new StepFrame(msgFrameInput);
+
+        m_FrameBuffer.EnqueueServerFrame(stepFrame);
         
+        //如果是第一次收到服务器帧，记录时间作为游戏开始时间
         if (m_GameStartTimestampMs == -1) {
             m_GameStartTimestampMs = LTime.realtimeSinceStartupMS;
         }

@@ -47,7 +47,7 @@ namespace LockstepTutorial {
                 }
 
                 isSprint = Input.GetKeyDown(KeyCode.Space);
-                GameEntry.CurGameInput =  new PlayerInput() {
+                GameEntry.CurrentGameInput =  new PlayerInput() {
                     MousePos = mousePos,
                     InputUV = mouseUV,
                     IsSprint = isSprint,

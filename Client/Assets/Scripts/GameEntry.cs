@@ -17,8 +17,8 @@ public partial class GameEntry : MonoBehaviour
 
     public static float Ping;
     public static List<float> Delays = new List<float>();
-    public static PlayerInput CurGameInput;
-    public static int CurTick;
+    public static PlayerInput CurrentGameInput;
+    public static int CurrentTick;
     #endregion
 
     #region Network
@@ -148,11 +148,11 @@ public partial class GameEntry : MonoBehaviour
         //@TIPS: client可能因为网络原因改变本地stepInterval
         //，因此在其OnUpdate中进行Execute的调用，这里只对server execute
         //，具体见Client.OnUpdate
-        if(IsClientMode || IsReplayMode)
-            m_Client?.Execute(deltaTime);
-        
-        if(NetMode is ENetMode.Client)
-            m_Client?.Execute(deltaTime);
+        // if(IsClientMode || IsReplayMode)
+        //     m_Client?.Execute(deltaTime);
+        //
+        // if(NetMode is ENetMode.Client)
+        //     m_Client?.Execute(deltaTime);
 
         if (NetMode is ENetMode.Server)
             m_Server?.Execute(deltaTime);
