@@ -6,8 +6,9 @@ public class FrameBuffer
 {
 
     #region 配置
-    public const long MaxSimulationMsPerFrame = 20;
-    public const int MaxPredictFrameCount = 30;
+    public long MaxSimulationMsPerFrame = 20;
+    //buffers,这个和client.cs中的FramePredictCount不一样，两边单独分开判断
+    public int MaxPredictFrameCount = 30;
     
     #endregion
     
@@ -18,28 +19,27 @@ public class FrameBuffer
     public int Capacity => m_LocalFrames?.Length ?? 0;
     
 
-    //buffers,这个和client.cs中的FramePredictCount不一样，两边单独分开判断
-    private int m_MaxClientPredictFrameCount;
-    private int m_BufferSize;
-    private int m_SpaceRollbackNeed;
-    private int m_MaxServerOverFrameCount;
+    //public int MaxClientPredictFrameCount;
+    public int SpaceRollbackNeed { get; private set; }
+    public int MaxServerOverFrameCount { get; private set; }
+    public int SnapShotFrameInterval { get; private set; }
     
     /// the tick client need run in next update
     private int m_NextClientTick;
-
-    public int CurTickInServer { get; private set; }
+    
     public int NextTickToCheck { get; private set; }
     public int MaxServerTickInBuffer { get; private set; } = -1;
     public bool IsNeedRollback { get; private set; }
     public int MaxContinueServerTick { get; private set; }
     
     
-    public FrameBuffer(int capacity, int snapShotFrameInterval = 1)
+    public FrameBuffer(int capacity, int snapShotFrameInterval)
     {
         m_LocalFrames = new StepFrame[capacity];
         m_ServerFrames = new StepFrame[capacity];
-        m_SpaceRollbackNeed = 2 * snapShotFrameInterval;
-        m_MaxServerOverFrameCount = capacity - m_SpaceRollbackNeed;
+        SnapShotFrameInterval = snapShotFrameInterval;
+        SpaceRollbackNeed = 2 * snapShotFrameInterval;
+        MaxServerOverFrameCount = capacity - SpaceRollbackNeed;
     }
 
     #region 外部设置变量接口
@@ -95,6 +95,11 @@ public class FrameBuffer
     public void EnqueueLocalFrame(StepFrame stepFrame)
     {
         int frameIndex = stepFrame.Tick % Capacity;
+        if (m_LocalFrames[frameIndex].Tick > stepFrame.Tick)
+        {
+            Debug.LogError($"enqueue local frame tick:{stepFrame.Tick} is less than buffer tick: {m_LocalFrames[frameIndex].Tick}, check");
+        }
+        
         m_LocalFrames[frameIndex] = stepFrame;
     }
     
@@ -111,12 +116,7 @@ public class FrameBuffer
         {
             return;
         }
-
-        if (serverFrame.Tick > CurTickInServer)
-        {
-            CurTickInServer = serverFrame.Tick;
-        }
-
+        
         if (serverFrame.Tick > MaxServerTickInBuffer)
         {
             MaxServerTickInBuffer = serverFrame.Tick;

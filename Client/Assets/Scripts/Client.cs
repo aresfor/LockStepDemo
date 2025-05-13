@@ -59,6 +59,15 @@ public class Client
     #endregion
 
     private FrameBuffer m_FrameBuffer;
+
+    private bool m_bIsPursuingFrame;
+
+    #region 配置
+
+    public int BufferCapacity = 120;
+    public int SnapShotFrameInterval = 1;
+
+    #endregion
     
     public Client()
     {
@@ -66,12 +75,13 @@ public class Client
         m_CachedFreeCallback = Marshal.GetFunctionPointerForDelegate(m_FreeCallback);
     }
 
-    public Thread StartClient(Host host, Address address, int bufferCapacity)
+    public Thread StartClient(Host host, Address address)
     {
         m_HostClient = host;
         m_HostClient.Create();
-
-        m_FrameBuffer = new FrameBuffer(bufferCapacity);
+        m_bIsPursuingFrame = false;
+        
+        m_FrameBuffer = new FrameBuffer(BufferCapacity, SnapShotFrameInterval);
         
         m_Address = address;
         State = EClientState.Connecting;
@@ -139,11 +149,15 @@ public class Client
 
     public void OnUpdate(float deltaTime)
     {
+        if (false == m_GameStarted)
+            return;
+        
         m_TickSinceGameStart =
             (int) ((LTime.realtimeSinceStartupMS - m_GameStartTimestampMs)
-                   / GameEntry.Instance.UpdateCallPerSecond);
+                   / GameEntry.Instance.StepCountPerFrame);
 
         m_FrameBuffer.OnUpdate(deltaTime, GameEntry.CurrentTick);
+        
         
         if (GameEntry.Instance.IsClientMode)
         {
@@ -162,8 +176,6 @@ public class Client
 
     private void SendInputs(int tick)
     {
-        //@TODO: 获取本地的完整输入，这里只是临时的，输入需要通过inputservice去获取
-        
         //@TODO: pool
         Msg_FrameInput msgframeInput = new Msg_FrameInput()
         {
@@ -185,7 +197,7 @@ public class Client
         if (tick > m_FrameBuffer.MaxServerTickInBuffer)
         {
             GameEntry.Instance.Tick2SendTimer[tick] = LTime.realtimeSinceStartupMS;
-            SendInput2Server();
+            SendInput2Server(stepFrame);
 
         }
     }
@@ -203,25 +215,14 @@ public class Client
         stepFrame.FrameInput.Input.inputs[m_LocalPlayerId] = localPlayerInput;
         
     }
-
-    private void FillInputWithLastFrame(FrameInput frame){
-        // int tick = frame.tick;
-        // var inputs = frame.inputs;
-        // var lastServerInputs = tick == 0 ? null : m_CommandBuffer.GetFrame(tick - 1)?.Inputs;
-        // var localInput = inputs[m_LocalPlayerId];
-        // //fill inputs with last frame's input (Input predict)
-        // for (int i = 0; i < Players.Length; i++) {
-        //     inputs[i] = new Msg_PlayerInput(tick, _allActors[i], lastServerInputs?[i]?.Commands);
-        // }
-        //
-        // inputs[m_LocalPlayerId] = localInput;
-    }
     
     private void OnUpdateClientMode()
     {
         while (GameEntry.CurrentTick < TargetTick)
         {
             //FramePredictCount = 0;
+            
+            //@TODO: pool
             Msg_PlayerInput msgPlayerInput = new Msg_PlayerInput()
             {
                 PlayerInput = GameEntry.CurrentGameInput.Clone(),
@@ -235,60 +236,183 @@ public class Client
                     tick = GameEntry.CurrentTick
                 }
             };
+
+            StepFrame stepFrame = new StepFrame(msgFrameInput);
+            m_FrameBuffer.EnqueueLocalFrame(stepFrame);
+            m_FrameBuffer.EnqueueServerFrame(stepFrame);
             
-            //@TODO: Push frame...
+            //@TEMP: 本地可以测试回滚到任一帧，所以每帧保存快照
+            Step(stepFrame, true);
         }
     }
 
     private void OnUpdateInternal()
     {
-        
-    }
-    
-    public void Execute(float deltaTime)
-    {
-        if (!m_GameStarted)
-            return;
-        
-        //@TODO: debug rollback to ...
-        
+        int maxContinueServerTick = m_FrameBuffer.MaxContinueServerTick;
+        int maxServerTickInBuffer = m_FrameBuffer.MaxServerTickInBuffer;
+        var minTickToBackup = (maxContinueServerTick - (maxContinueServerTick % SnapShotFrameInterval));
 
-        if (!GameEntry.Instance.IsReplayMode)
+        //如果超过了预测最大帧数，不step
+        //目前MaxPredictFrameCount：30
+        while (GameEntry.CurrentTick > m_FrameBuffer.MaxPredictFrameCount)
         {
-            SendInput2Server();
+            return;
         }
-        
-        if (GetFrame(GameEntry.CurrentTick) == null)
-            return;
 
-        Step(deltaTime);
-    }
+        var deadline = LTime.realtimeSinceStartupMS + m_FrameBuffer.MaxSimulationMsPerFrame;
 
-    public void Step(float deltaTime)
-    {
-        UpdateFrameInput();
-        
-        //@TODO: Replay JumpTp
-        if (GameEntry.Instance.IsReplayMode)
+        //追服务器帧
+        while (GameEntry.CurrentTick <= maxServerTickInBuffer)
         {
-            if (GameEntry.CurrentTick < Frames.Count)
+            StepFrame serverFrame = m_FrameBuffer.GetServerFrame(GameEntry.CurrentTick);
+            if (serverFrame == null)
             {
-                Replay(deltaTime);
-                ++GameEntry.CurrentTick;
-                int nextClientTick = GameEntry.CurrentTick;
-                m_FrameBuffer.SetNextClientTick(nextClientTick);
+                MarkPursuingFrame();
+
+                return;
+            }
+            
+            m_FrameBuffer.EnqueueServerFrame(serverFrame);
+            Step(serverFrame, GameEntry.CurrentTick == minTickToBackup);
+            if (LTime.realtimeSinceStartupMS > deadline && GameEntry.CurrentTick < maxServerTickInBuffer)
+            {
+                MarkPursuingFrame();
+                return;
             }
         }
-        else
-        {
-            //send hash
-            StepInternal(deltaTime);
 
-            SendHash2Server();
-            ++GameEntry.CurrentTick;
-            int nextClientTick = GameEntry.CurrentTick;
-            m_FrameBuffer.SetNextClientTick(nextClientTick);
+        if (m_bIsPursuingFrame)
+        {
+            //@TODO: 触发事件？
         }
+        
+
+        if (m_FrameBuffer.IsNeedRollback)
+        {
+            RollbackTo(GameEntry.CurrentTick);
+            //@TODO: 验证哈希，清理哈希
+            //@TODO: 重新计算下次快照保存时间
+            minTickToBackup = Mathf.Min(GameEntry.CurrentTick, minTickToBackup);
+            while (GameEntry.CurrentTick <= maxContinueServerTick)
+            {
+                StepFrame serverFrame = m_FrameBuffer.GetServerFrame(GameEntry.CurrentTick);
+                //@TODO: Rollback应该清理了无效的local
+                m_FrameBuffer.EnqueueLocalFrame(serverFrame);
+                Step(serverFrame, minTickToBackup == GameEntry.CurrentTick);
+            }
+
+        }
+        
+        //预测帧，前面已经追到服务器帧了，这里直接取本地输入做预测就行
+        //因为可能预测失败回滚了，还需要用服务器的他人输入来填充当前预测帧
+        //@Attention: PreSend需要比predictFrameCount大吗？
+        while (GameEntry.CurrentTick <= TargetTick)
+        {
+            StepFrame predictLocalStepFrame = m_FrameBuffer.GetLocalFrame(GameEntry.CurrentTick);
+            if (null == predictLocalStepFrame)
+            {
+                Msg_FrameInput msgFrameInput = new Msg_FrameInput()
+                {
+                    Input = new FrameInput()
+                    {
+                        inputs = new[] { GameEntry.CurrentGameInput },
+                        tick = GameEntry.CurrentTick
+                    }
+                };
+                predictLocalStepFrame = new StepFrame(msgFrameInput);
+                m_FrameBuffer.EnqueueLocalFrame(predictLocalStepFrame);
+            }
+            FillInputWithLastFrame(predictLocalStepFrame);
+            Predict(predictLocalStepFrame);
+        }
+        
+        //@TODO: 发送状态哈希
+        //@TIPS: 哈希不一定是每个step需要发， 服务器只需要判断某些时候的哈希不一样了告诉客户端就行
+    }
+
+    private void MarkPursuingFrame()
+    {
+        m_bIsPursuingFrame = true;
+    }
+
+    private void Predict(StepFrame stepFrame)
+    {
+        //预测的帧每帧都需要快照
+        Step(stepFrame, true);
+
+    }
+
+    private void RollbackTo(int tick)
+    {
+        Debug.LogError($"do rollback to :{tick}, nextTickToCheck: {m_FrameBuffer.NextTickToCheck}");
+        
+        //@TODO: 清理无效的localframes
+
+    }
+    
+    private void CleanUselessSnapshot(int tick)
+    {
+        //@TODO: implementation
+
+    }
+
+    private void FillPlayerInputs(StepFrame stepFrame)
+    {
+        PlayerInput[] playerBufferInputs = stepFrame.FrameInput.Input.inputs;
+        
+        for (int i = 0; i < playerBufferInputs.Length; ++i)
+        {
+            if (m_LocalPlayerId > playerBufferInputs.Length)
+            {
+                Debug.LogError($"LocalPlayerId : {m_LocalPlayerId} bigger than playerInputBufferSize: {playerBufferInputs.Length}");
+                return;
+            }
+            PlayerInput playerBufferInput = stepFrame.FrameInput.Input.inputs[i];
+            Players[i].Input = playerBufferInput.Clone();
+        }
+    }
+    
+    public void Step(StepFrame stepFrame, bool shouldSnapshot)
+    {
+        int worldTick = GameEntry.CurrentTick;
+        
+        
+        //@TODO:计算哈希
+        //@TODO: 状态备份
+        //@TODO: 状态日志
+        
+        StepInternal(stepFrame);
+        FillPlayerInputs(stepFrame);
+        m_FrameBuffer.SetNextClientTick(worldTick + 1);
+
+        ++worldTick;
+
+        if (shouldSnapshot) {
+            //@TODO: implementation
+            CleanUselessSnapshot(System.Math.Min(m_FrameBuffer.NextTickToCheck - 1, stepFrame.Tick));
+            
+        }
+        //@TODO: Replay JumpTo and replay refracture
+        // if (GameEntry.Instance.IsReplayMode)
+        // {
+        //     if (GameEntry.CurrentTick < Frames.Count)
+        //     {
+        //         Replay(deltaTime);
+        //         ++GameEntry.CurrentTick;
+        //         int nextClientTick = GameEntry.CurrentTick;
+        //         m_FrameBuffer.SetNextClientTick(nextClientTick);
+        //     }
+        // }
+        // else
+        // {
+        //     //send hash
+        //     StepInternal(deltaTime);
+        //
+        //     SendHash2Server();
+        //     ++GameEntry.CurrentTick;
+        //     int nextClientTick = GameEntry.CurrentTick;
+        //     m_FrameBuffer.SetNextClientTick(nextClientTick);
+        // }
     }
 
     private void SendHash2Server()
@@ -327,41 +451,25 @@ public class Client
     }
 
 
+    //@TODO: implementation
     private void Replay(float deltaTime)
     {
-        StepInternal(deltaTime);
+        //StepInternal(deltaTime);
     }
 
-    private void StepInternal(float deltaTime)
+    private void StepInternal(StepFrame stepFrame)
     {
-        LFloat deltaTimeF = deltaTime.ToLFloat();
+        LFloat deltaTime = new LFloat(true, GameEntry.Instance.StepCountPerFrame);
+
 
         foreach (var player in Players)
         {
             var uv = player.Input.InputUV;
-            player.Position += new LVector3(uv.x,LFloat.zero, uv.y) * deltaTimeF;
+            player.Position += new LVector3(uv.x,LFloat.zero, uv.y) * deltaTime;
             player.Go.transform.position = player.Position.ToVector3();
         }
         
         
-    }
-    
-    private void UpdateFrameInput(){
-        var curFrameInput = GetFrame(GameEntry.CurrentTick);
-        for (int i = 0; i < Players.Length; i++) {
-            Players[i].Input = curFrameInput.inputs[i];
-        }
-        
-    }
-    public FrameInput GetFrame(int tick){
-        if (Frames.Count > tick) {
-            var frame = Frames[tick];
-            if (frame != null && frame.tick == tick) {
-                return frame;
-            }
-        }
-
-        return null;
     }
 
     public void SendStartGame2Server()

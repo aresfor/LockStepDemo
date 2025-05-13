@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using ENet;
+using Lockstep.Math;
 using Lockstep.Util;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -27,19 +28,20 @@ public partial class GameEntry : MonoBehaviour
     public bool IsReplayMode;
     public string IP = "localhost";
     public ushort Port = 9500;
-    [Range(10, 60)]
-    public int Step = 15;
+    // [Range(10, 60)]
+    // public int Step = 15;
 
     [Range(10, 60)]
-    public int UpdateCallPerSecond = 30;
+    public int StepCountPerFrame = 15;
     
     public int MaxPlayers = 10;
     public int MaxPeers => MaxPlayers * 2;
     public int MaxChannels = 10;
     
-    public float StepInterval => 1.0f / Step;
+    public LFloat StepInterval => LFloat.one / new LFloat(true, StepCountPerFrame);
 
-    private float m_LastStepTime;
+    public float ServerStepInterval => 1.0f / StepCountPerFrame;
+    private float m_LastServerStepTime;
     private Host m_Host;
 
     private Client m_Client;
@@ -62,7 +64,6 @@ public partial class GameEntry : MonoBehaviour
     private void Awake()
     {
         Instance = this;
-        
         LTime.DoStart();
         
         if (!Application.isEditor)
@@ -71,7 +72,7 @@ public partial class GameEntry : MonoBehaviour
 
     private void Start()
     {
-        m_LastStepTime = Time.time;
+        m_LastServerStepTime = Time.time;
         
         
         if (IsReplayMode)
@@ -133,31 +134,18 @@ public partial class GameEntry : MonoBehaviour
         }
         m_Client?.OnUpdate(Time.deltaTime);
         
-        while (m_LastStepTime + StepInterval < Time.time)
+        while (m_LastServerStepTime + ServerStepInterval < Time.time)
         {
             //Execute(Time.time - m_LastStepTime);
-            Execute(StepInterval);
-            m_LastStepTime += StepInterval;
+            //@TIPS: client可能因为网络原因改变本地stepInterval
+            //，因此在其OnUpdate中进行Execute的调用，这里只对server execute
+            //，具体见Client.OnUpdate
+            if (NetMode is ENetMode.Server)
+                m_Server?.Execute(ServerStepInterval);
+            m_LastServerStepTime += ServerStepInterval;
         }
 
     }
-
-    private void Execute(float deltaTime)
-    {
-        
-        //@TIPS: client可能因为网络原因改变本地stepInterval
-        //，因此在其OnUpdate中进行Execute的调用，这里只对server execute
-        //，具体见Client.OnUpdate
-        // if(IsClientMode || IsReplayMode)
-        //     m_Client?.Execute(deltaTime);
-        //
-        // if(NetMode is ENetMode.Client)
-        //     m_Client?.Execute(deltaTime);
-
-        if (NetMode is ENetMode.Server)
-            m_Server?.Execute(deltaTime);
-    }
-    
 
     private void OnDestroy()
     {
