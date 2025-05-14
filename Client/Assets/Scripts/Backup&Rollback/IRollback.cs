@@ -2,5 +2,5 @@
 
 public interface IRollback
 {
-    void RollBackTo(int tick);
+    void RollbackTo(int currentTick, int toTick);
 }

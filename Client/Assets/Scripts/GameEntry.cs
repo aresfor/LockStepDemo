@@ -38,7 +38,7 @@ public partial class GameEntry : MonoBehaviour
     public int MaxPeers => MaxPlayers * 2;
     public int MaxChannels = 10;
     
-    public LFloat StepInterval => LFloat.one / new LFloat(true, StepCountPerFrame);
+    public LFloat StepIntervalMS => LFloat.one / new LFloat(true, StepCountPerFrame * 1000);
 
     public float ServerStepInterval => 1.0f / StepCountPerFrame;
     private float m_LastServerStepTime;
@@ -60,7 +60,9 @@ public partial class GameEntry : MonoBehaviour
     public Dictionary<int, float> Tick2SendTimer = new Dictionary<int, float>();
 
     public PlayerServerInfo ClientPlayerInfo;
-    
+
+    public int CurrentHash;
+    public IServiceContainer ServiceContainer;
     private void Awake()
     {
         Instance = this;
@@ -68,6 +70,10 @@ public partial class GameEntry : MonoBehaviour
         
         if (!Application.isEditor)
             IsClientMode = false;
+
+        ServiceContainer = new ServiceContainer();
+        ServiceContainer.RegisterService<IGameStateService, GameStateService>(new GameStateService());
+        ServiceContainer.RegisterService<IIdService, IdService>(new IdService());
     }
 
     private void Start()

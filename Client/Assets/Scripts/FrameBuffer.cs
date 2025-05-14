@@ -28,6 +28,7 @@ public class FrameBuffer
     private int m_NextClientTick;
     
     public int NextTickToCheck { get; private set; }
+    public int CurrentTickInServer { get; private set; }
     public int MaxServerTickInBuffer { get; private set; } = -1;
     public bool IsNeedRollback { get; private set; }
     public int MaxContinueServerTick { get; private set; }
@@ -117,6 +118,16 @@ public class FrameBuffer
             return;
         }
         
+        if (serverFrame.Tick > CurrentTickInServer) {
+            CurrentTickInServer = serverFrame.Tick;
+        }
+
+        
+        if (serverFrame.Tick >= NextTickToCheck + MaxServerOverFrameCount - 1) {
+            //to avoid ringBuffer override the frame that have not been checked
+            return;
+            
+        }
         if (serverFrame.Tick > MaxServerTickInBuffer)
         {
             MaxServerTickInBuffer = serverFrame.Tick;

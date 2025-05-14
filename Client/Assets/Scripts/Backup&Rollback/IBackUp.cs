@@ -1,5 +1,5 @@
 ﻿
     public interface IBackUp
     {
-        void BackUp(int tick);
+        void Backup(int tick);
     }

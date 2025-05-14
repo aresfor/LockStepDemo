@@ -27,13 +27,10 @@ public class Client
     private readonly ClientCommandHandler m_CommandHandler;
     public Peer ConnectedServerPeer;
     public EClientState State = EClientState.Disconnected;
-    
-    
 
     public int PreSendInputCount { get; private set; } = 2;
     public int InputTick { get; private set; } = 0;
     public int InputTargetTick => m_TickSinceGameStart + PreSendInputCount;
-    
     
     /// game init timestamp
     private long m_GameStartTimestampMs = -1;
@@ -60,6 +57,8 @@ public class Client
 
     private FrameBuffer m_FrameBuffer;
 
+    private HashHelper m_HashHelper;
+
     private bool m_bIsPursuingFrame;
 
     #region 配置
@@ -82,7 +81,7 @@ public class Client
         m_bIsPursuingFrame = false;
         
         m_FrameBuffer = new FrameBuffer(BufferCapacity, SnapShotFrameInterval);
-        
+        m_HashHelper = new HashHelper(GameEntry.Instance.ServiceContainer, m_FrameBuffer);
         m_Address = address;
         State = EClientState.Connecting;
         EnqueueRequest(EClientNetThreadRequest.Connect);
@@ -262,7 +261,7 @@ public class Client
         var deadline = LTime.realtimeSinceStartupMS + m_FrameBuffer.MaxSimulationMsPerFrame;
 
         //追服务器帧
-        while (GameEntry.CurrentTick <= maxServerTickInBuffer)
+        while (GameEntry.CurrentTick <= m_FrameBuffer.CurrentTickInServer)
         {
             StepFrame serverFrame = m_FrameBuffer.GetServerFrame(GameEntry.CurrentTick);
             if (serverFrame == null)
@@ -326,8 +325,9 @@ public class Client
             Predict(predictLocalStepFrame);
         }
         
-        //@TODO: 发送状态哈希
+        //@TODO: 内部实现还没有发送哈希到服务器
         //@TIPS: 哈希不一定是每个step需要发， 服务器只需要判断某些时候的哈希不一样了告诉客户端就行
+        m_HashHelper.CheckAndSendHashCodes();
     }
 
     private void MarkPursuingFrame()
@@ -345,9 +345,29 @@ public class Client
     private void RollbackTo(int tick)
     {
         Debug.LogError($"do rollback to :{tick}, nextTickToCheck: {m_FrameBuffer.NextTickToCheck}");
-        
-        //@TODO: 清理无效的localframes
 
+        if (tick < 0)
+        {
+            Debug.LogError($"rollback to tick: {tick} < 0");
+            return;
+        }
+
+        GameEntry.Instance.ServiceContainer.RollbackTo(GameEntry.CurrentTick, tick);
+        
+        GameEntry.CurrentTick = tick;
+
+        int oldHash = GameEntry.Instance.CurrentHash;
+        int currentHash = m_HashHelper.CalcHash();
+
+        if (oldHash != currentHash)
+        {
+            Debug.LogError($"rollback to tick: {tick}, but oldHash: {oldHash} is not equal to current hash: {currentHash}");
+            return;
+        }
+
+
+        //@Question: 貌似不需要？ 因为输入只发送和本地记录一次
+        //@TODO: 清理无效的localframes
     }
     
     private void CleanUselessSnapshot(int tick)
@@ -378,7 +398,9 @@ public class Client
         
         
         //@TODO:计算哈希
+        GameEntry.Instance.CurrentHash = m_HashHelper.CalcHash();
         //@TODO: 状态备份
+        GameEntry.Instance.ServiceContainer.Backup(GameEntry.CurrentTick);
         //@TODO: 状态日志
         
         StepInternal(stepFrame);
@@ -417,18 +439,18 @@ public class Client
 
     private void SendHash2Server()
     {
-        Msg_PlayerHash playerHash = new Msg_PlayerHash();
-        playerHash.Hash = GetHash();
-        playerHash.Tick = GameEntry.CurrentTick;
-        var bytes = playerHash.ToBytes();
-        var data = MessagePacker.Instance.GetBytesPtr(playerHash.OpCode, bytes, out var totalLength);
-        
-        EnqueueSendData(new FSendData()
-        {
-            Data = data,
-            Length = totalLength,
-            Peer =  ConnectedServerPeer
-        });
+        // Msg_PlayerHash playerHash = new Msg_PlayerHash();
+        // playerHash.Hash = GetHash();
+        // playerHash.Tick = GameEntry.CurrentTick;
+        // var bytes = playerHash.ToBytes();
+        // var data = MessagePacker.Instance.GetBytesPtr(playerHash.OpCode, bytes, out var totalLength);
+        //
+        // EnqueueSendData(new FSendData()
+        // {
+        //     Data = data,
+        //     Length = totalLength,
+        //     Peer =  ConnectedServerPeer
+        // });
     }
 
     private int GetHash()
@@ -459,8 +481,7 @@ public class Client
 
     private void StepInternal(StepFrame stepFrame)
     {
-        LFloat deltaTime = new LFloat(true, GameEntry.Instance.StepCountPerFrame);
-
+        LFloat deltaTime = new LFloat(true, GameEntry.Instance.StepIntervalMS._val);
 
         foreach (var player in Players)
         {
@@ -468,7 +489,6 @@ public class Client
             player.Position += new LVector3(uv.x,LFloat.zero, uv.y) * deltaTime;
             player.Go.transform.position = player.Position.ToVector3();
         }
-        
         
     }
 

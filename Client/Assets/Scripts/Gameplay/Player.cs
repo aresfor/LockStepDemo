@@ -1,9 +1,10 @@
 ﻿
 
 using Lockstep.Math;
+using Lockstep.Serialization;
 using UnityEngine;
 
-public class Player
+public class Player:Entity
 {
     public int LocalId;
 
@@ -11,5 +12,15 @@ public class Player
 
     public GameObject Go;
 
-    public LVector3 Position;
+    public override void Write(Serializer writer)
+    {
+        base.Write(writer);
+        writer.Write(LocalId);
+    }
+
+    public override void Read(Deserializer reader)
+    {
+        base.Read(reader);
+        LocalId = reader.ReadInt32();
+    }
 }

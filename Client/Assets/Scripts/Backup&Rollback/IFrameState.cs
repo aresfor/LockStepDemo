@@ -1,7 +1,7 @@
 ﻿
     public interface IFrameState:IRollback, IBackUp
     {
-        int CurrentTick { get; }
+        //int CurrentTick { get; }
 
-        int Clear(int maxVerifiedTick);
+        void Clear(int currentTick, int targetTick);
     }
