@@ -6,6 +6,7 @@ using System.Threading;
 using DisruptorUnity3d;
 using ENet;
 using Lockstep.Logic;
+using Lockstep.Util;
 using UnityEngine;
 using Event = ENet.Event;
 using EventType = ENet.EventType;
@@ -37,7 +38,36 @@ public class Server
     
     private Dictionary<int, PlayerInput[]> m_Tick2Inputs = new Dictionary<int, PlayerInput[]>();
     private Dictionary<int, int[]> m_Tick2Hashes = new Dictionary<int, int[]>();
-    private int m_CurTick;
+    
+    
+    
+
+
+    #region 游戏/Game
+
+    private float _gameFirstFrameTimeStamp = 0;
+
+    public int _tickSinceGameStart =>
+        (int)((Time.time - _gameStartTimestampMs) / GameEntry.Instance.ServerStepInterval);
+        //(int) ((LTime.realtimeSinceStartupMS - _gameStartTimestampMs) / GameEntry.Instance.StepIntervalMS);
+    
+    public float _gameStartTimestampMs = -1;
+
+    private int m_CurrentTick;
+    
+
+    #endregion
+
+    #region 非游戏/Server
+    
+
+    private DateTime _lastUpdateTimeStamp;
+    
+
+    #endregion
+    //private int _ServerTickDelay;
+
+
     public Server()
     {
         m_CommandHandler = new ServerCommandHandler(this);
@@ -140,7 +170,7 @@ public class Server
         }
 
         playerInputs[playerInfo.id] = msgPlayerInput.PlayerInput;
-        CheckInput();
+        CheckInput(false);
     }
 
     public void OnPlayerHash(Peer peer, IMessage message)
@@ -182,7 +212,13 @@ public class Server
         m_Tick2Hashes.Remove(msgPlayerHash.Tick);
     }
 
-    public void Execute(float deltaTime)
+    private void OnStartServerSuccess()
+    {
+        
+    }
+
+    
+    public void ExecuteNet(float deltaTime)
     {
         while (m_Responses.TryDequeue(out var response))
             switch (response)
@@ -190,6 +226,7 @@ public class Server
                 case EServerNetThreadResponse.StartSuccess:
                     Debug.Log("Server is working");
                     State = EServerState.Working;
+                    OnStartServerSuccess();
                     break;
                 case EServerNetThreadResponse.StartFailure:
                     Debug.Log("Server start failed");
@@ -235,45 +272,78 @@ public class Server
                     break;
             }
         }
-
-        OnExecute(deltaTime);
+        
 
     }
 
-
-    private void OnExecute(float deltaTime)
+    public void Update(float deltaTime)
     {
-        if (!m_GameStarted)
+        OnUpdate(deltaTime);
+    }
+    public void OnUpdate(float deltaTime)
+    {
+        if (false == m_GameStarted)
             return;
-        CheckInput();
-
-    }
-
-    private void CheckInput()
-    {
-        if (m_Tick2Inputs.TryGetValue(m_CurTick, out PlayerInput[] playerInputs))
+        
+        while (m_CurrentTick < _tickSinceGameStart)
         {
-            if (playerInputs != null)
-            {
-                bool isFullInput = true;
-                for (int i = 0; i < playerInputs.Length; ++i)
-                {
-                    if (playerInputs[i] == null)
-                    {
-                        isFullInput = false;
-                        break;
-                    }
-                }
-
-                if (isFullInput)
-                {
-                    BoardInputMsg(m_CurTick, playerInputs);
-                    m_Tick2Inputs.Remove(m_CurTick);
-                    ++m_CurTick;
-                }
-            }
-            
+            CheckInput(true);
         }
+    }
+    
+    private void CheckInput(bool force)
+    {
+        if (false == m_GameStarted)
+            return;
+
+        PlayerInput[] playerInputs = null;
+        if (false == m_Tick2Inputs.ContainsKey(m_CurrentTick))
+        {
+            playerInputs = new PlayerInput[Id2PlayerInfos.Count];
+            m_Tick2Inputs[m_CurrentTick] = playerInputs;
+        }
+
+        playerInputs = m_Tick2Inputs[m_CurrentTick];
+
+        bool isFullInput = true;
+        for (int i = 0; i < playerInputs.Length; ++i)
+        {
+            if (playerInputs[i] == null)
+            {
+                isFullInput = false;
+                break;
+            }
+        }
+
+        if (false == isFullInput && false == force)
+        {
+            return;
+        }
+
+        //如果输入满了或者force，那么直接发送，目前序列化会记录是否是null
+
+        BoardInputMsg(m_CurrentTick, playerInputs);
+        m_Tick2Inputs.Remove(m_CurrentTick);
+        ++m_CurrentTick;
+
+        //if (isFullInput)
+        // {
+        //     BoardInputMsg(m_CurrentTick, playerInputs);
+        //     m_Tick2Inputs.Remove(m_CurrentTick);
+        //     ++m_CurrentTick;
+        // }
+
+        
+        if (_gameFirstFrameTimeStamp <= 0) {
+            _gameFirstFrameTimeStamp = Time.time;
+        }
+
+        if (_gameStartTimestampMs < 0)
+        {
+            _gameStartTimestampMs = Time.time;
+        }
+        
+        
     }
     private void BoardInputMsg(int tick, PlayerInput[] inputs){
         var frame = new Msg_FrameInput();
@@ -438,6 +508,7 @@ public class Server
         m_NetThread = new Thread(NetworkThread);
         m_NetThread.Start();
 
+        
         return m_NetThread;
     }
 }

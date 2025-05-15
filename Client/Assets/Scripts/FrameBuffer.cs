@@ -96,7 +96,8 @@ public class FrameBuffer
     public void EnqueueLocalFrame(StepFrame stepFrame)
     {
         int frameIndex = stepFrame.Tick % Capacity;
-        if (m_LocalFrames[frameIndex].Tick > stepFrame.Tick)
+        if (m_LocalFrames[frameIndex] != null 
+            && m_LocalFrames[frameIndex].Tick > stepFrame.Tick)
         {
             Debug.LogError($"enqueue local frame tick:{stepFrame.Tick} is less than buffer tick: {m_LocalFrames[frameIndex].Tick}, check");
         }

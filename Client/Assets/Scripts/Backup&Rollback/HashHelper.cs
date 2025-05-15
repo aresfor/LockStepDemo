@@ -19,21 +19,23 @@ using Lockstep.Serialization;
         }
 
 
-        public void CheckAndSendHashCodes(){
-            //only sends the hashCodes whose FrameInputs was checked
-            if (m_CmdBuffer.NextTickToCheck > _firstHashTick) {
-                var count = LMath.Min(_allHashCodes.Count, (int) (m_CmdBuffer.NextTickToCheck - _firstHashTick),
-                    (480 / 4));
-                if (count > 0) {
-                    
-                    //@TODO: send hashcode to server
-                    //_networkService.SendHashCodes(_firstHashTick, _allHashCodes, 0, count);
-                    
-                    _firstHashTick = _firstHashTick + count;
-                    _allHashCodes.RemoveRange(0, count);
-                }
-            }
-        }
+        // public void CheckAndSendHashCodes(){
+        //     //only sends the hashCodes whose FrameInputs was checked
+        //     if (m_CmdBuffer.NextTickToCheck > _firstHashTick) {
+        //         var count = LMath.Min(_allHashCodes.Count, (int) (m_CmdBuffer.NextTickToCheck - _firstHashTick),
+        //             (480 / 4));
+        //         if (count > 0) {
+        //             
+        //             //@TODO: send hashcode to server
+        //             //_networkService.SendHashCodes(_firstHashTick, _allHashCodes, 0, count);
+        //             
+        //             _firstHashTick = _firstHashTick + count;
+        //             _allHashCodes.RemoveRange(0, count);
+        //         }
+        //     }
+        // }
+        //
+
 
         public bool TryGetValue(int tick, out int hash){
             return _tick2Hash.TryGetValue(tick, out hash);

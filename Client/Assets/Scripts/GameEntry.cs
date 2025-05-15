@@ -40,8 +40,8 @@ public partial class GameEntry : MonoBehaviour
     
     public LFloat StepIntervalMS => LFloat.one / new LFloat(true, StepCountPerFrame * 1000);
 
-    public float ServerStepInterval => 1.0f / StepCountPerFrame;
     private float m_LastServerStepTime;
+    public float ServerStepInterval => 1.0f / StepCountPerFrame;
     private Host m_Host;
 
     private Client m_Client;
@@ -138,7 +138,7 @@ public partial class GameEntry : MonoBehaviour
         {
             m_Client?.UpdateNetwork();
         }
-        m_Client?.OnUpdate(Time.deltaTime);
+        m_Client?.Update(Time.deltaTime);
         
         while (m_LastServerStepTime + ServerStepInterval < Time.time)
         {
@@ -147,9 +147,10 @@ public partial class GameEntry : MonoBehaviour
             //，因此在其OnUpdate中进行Execute的调用，这里只对server execute
             //，具体见Client.OnUpdate
             if (NetMode is ENetMode.Server)
-                m_Server?.Execute(ServerStepInterval);
+                m_Server?.ExecuteNet(ServerStepInterval);
             m_LastServerStepTime += ServerStepInterval;
         }
+        m_Server?.Update(Time.deltaTime);
 
     }
 

@@ -146,7 +146,7 @@ public class Client
         //_fromServer.Clear();
     }
 
-    public void OnUpdate(float deltaTime)
+    public void Update(float deltaTime)
     {
         if (false == m_GameStarted)
             return;
@@ -204,11 +204,12 @@ public class Client
     public void FillInputWithLastFrame(StepFrame stepFrame)
     {
         int tick = stepFrame.Tick;
-        StepFrame lastFrame = m_FrameBuffer.GetFrame(tick - 1);
+        StepFrame lastFrame = tick == 0? null :m_FrameBuffer.GetFrame(tick - 1);
         PlayerInput localPlayerInput = stepFrame.FrameInput.Input.inputs[m_LocalPlayerId];
         for (int i = 0; i < Players.Length; ++i)
         {
-            stepFrame.FrameInput.Input.inputs[i] = lastFrame.FrameInput.Input.inputs[i].Clone();
+            stepFrame.FrameInput.Input.inputs[i] = lastFrame != null? lastFrame.FrameInput.Input.inputs[i].Clone()
+                    : new PlayerInput();
         }
 
         stepFrame.FrameInput.Input.inputs[m_LocalPlayerId] = localPlayerInput;
@@ -240,7 +241,7 @@ public class Client
             m_FrameBuffer.EnqueueLocalFrame(stepFrame);
             m_FrameBuffer.EnqueueServerFrame(stepFrame);
             
-            //@TEMP: 本地可以测试回滚到任一帧，所以每帧保存快照
+            //@TIPS: 本地可以测试回滚到任一帧，所以每帧保存快照
             Step(stepFrame, true);
         }
     }
@@ -261,7 +262,7 @@ public class Client
         var deadline = LTime.realtimeSinceStartupMS + m_FrameBuffer.MaxSimulationMsPerFrame;
 
         //追服务器帧
-        while (GameEntry.CurrentTick <= m_FrameBuffer.CurrentTickInServer)
+        while (GameEntry.CurrentTick < m_FrameBuffer.CurrentTickInServer)
         {
             StepFrame serverFrame = m_FrameBuffer.GetServerFrame(GameEntry.CurrentTick);
             if (serverFrame == null)
@@ -327,7 +328,23 @@ public class Client
         
         //@TODO: 内部实现还没有发送哈希到服务器
         //@TIPS: 哈希不一定是每个step需要发， 服务器只需要判断某些时候的哈希不一样了告诉客户端就行
-        m_HashHelper.CheckAndSendHashCodes();
+        //m_HashHelper.CheckAndSendHashCodes();
+        SendHash2Server();
+    }
+    private void SendHash2Server()
+    {
+        Msg_PlayerHash playerHash = new Msg_PlayerHash();
+        playerHash.Hash = GameEntry.Instance.CurrentHash;
+        playerHash.Tick = GameEntry.CurrentTick;
+        var bytes = playerHash.ToBytes();
+        var data = MessagePacker.Instance.GetBytesPtr(playerHash.OpCode, bytes, out var totalLength);
+            
+        EnqueueSendData(new FSendData()
+        {
+            Data = data,
+            Length = totalLength,
+            Peer =  ConnectedServerPeer
+        });
     }
 
     private void MarkPursuingFrame()
@@ -394,8 +411,6 @@ public class Client
     
     public void Step(StepFrame stepFrame, bool shouldSnapshot)
     {
-        int worldTick = GameEntry.CurrentTick;
-        
         
         //@TODO:计算哈希
         GameEntry.Instance.CurrentHash = m_HashHelper.CalcHash();
@@ -405,9 +420,9 @@ public class Client
         
         StepInternal(stepFrame);
         FillPlayerInputs(stepFrame);
-        m_FrameBuffer.SetNextClientTick(worldTick + 1);
+        m_FrameBuffer.SetNextClientTick(GameEntry.CurrentTick + 1);
 
-        ++worldTick;
+        ++GameEntry.CurrentTick;
 
         if (shouldSnapshot) {
             //@TODO: implementation
@@ -437,40 +452,25 @@ public class Client
         // }
     }
 
-    private void SendHash2Server()
-    {
-        // Msg_PlayerHash playerHash = new Msg_PlayerHash();
-        // playerHash.Hash = GetHash();
-        // playerHash.Tick = GameEntry.CurrentTick;
-        // var bytes = playerHash.ToBytes();
-        // var data = MessagePacker.Instance.GetBytesPtr(playerHash.OpCode, bytes, out var totalLength);
-        //
-        // EnqueueSendData(new FSendData()
-        // {
-        //     Data = data,
-        //     Length = totalLength,
-        //     Peer =  ConnectedServerPeer
-        // });
-    }
-
-    private int GetHash()
-    {
-        int hash = 1;
-        int idx = 0;
-        
-        
-        foreach (var entity in Players) {
-            hash += entity.LocalId.GetHash() * PrimerLUT.GetPrimer(idx++);
-            hash += entity.Position.GetHash() * PrimerLUT.GetPrimer(idx++);
-        }
-
-        // foreach (var entity in EnemyManager.Instance.allEnemy) {
-        //     hash += entity.currentHealth.GetHash() * PrimerLUT.GetPrimer(idx++);
-        //     hash += entity.transform.GetHash() * PrimerLUT.GetPrimer(idx++);
-        // }
-
-        return hash;
-    }
+    
+    // private int GetHash()
+    // {
+    //     int hash = 1;
+    //     int idx = 0;
+    //     
+    //     
+    //     foreach (var entity in Players) {
+    //         hash += entity.LocalId.GetHash() * PrimerLUT.GetPrimer(idx++);
+    //         hash += entity.Position.GetHash() * PrimerLUT.GetPrimer(idx++);
+    //     }
+    //
+    //     // foreach (var entity in EnemyManager.Instance.allEnemy) {
+    //     //     hash += entity.currentHealth.GetHash() * PrimerLUT.GetPrimer(idx++);
+    //     //     hash += entity.transform.GetHash() * PrimerLUT.GetPrimer(idx++);
+    //     // }
+    //
+    //     return hash;
+    // }
 
 
     //@TODO: implementation
@@ -512,8 +512,14 @@ public class Client
     //@TODO: 封装到net service中
     public void SendInput2Server(StepFrame stepFrame)
     {
-        var bytes = stepFrame.FrameInput.ToBytes();
-        var data = MessagePacker.Instance.GetBytesPtr(stepFrame.FrameInput.OpCode, bytes, out var totalLength);
+        Msg_PlayerInput msgPlayerInput = new Msg_PlayerInput()
+        {
+            PlayerInput = GameEntry.CurrentGameInput.Clone(),
+            Tick = stepFrame.Tick
+        };
+        
+        var bytes = msgPlayerInput.ToBytes();
+        var data = MessagePacker.Instance.GetBytesPtr(msgPlayerInput.OpCode, bytes, out var totalLength);
         EnqueueSendData(new FSendData()
         {
             Data = data,
