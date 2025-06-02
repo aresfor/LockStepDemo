@@ -161,7 +161,7 @@ public class Client
             (int) ((LTime.realtimeSinceStartupMS - m_GameStartTimestampMs)
                    / GameEntry.Instance.ClientStepDeltaTime);
 
-        Debug.LogError($"当前帧: {m_TickSinceGameStart}, 当前world帧: {GameEntry.CurrentTick}");
+        Debug.LogError($"当前帧: {m_TickSinceGameStart}, 下一个world帧: {GameEntry.CurrentTick}");
         m_FrameBuffer.OnUpdate(deltaTime, GameEntry.CurrentTick);
         
         if (GameEntry.Instance.IsClientMode)
