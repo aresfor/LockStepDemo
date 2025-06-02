@@ -31,17 +31,20 @@ public partial class GameEntry : MonoBehaviour
     // [Range(10, 60)]
     // public int Step = 15;
 
-    [Range(10, 60)]
-    public int StepCountPerFrame = 15;
+    [Header("客户端更新间隔ms")]
+    public int ClientStepDeltaTime = 33;
+
     
+     [Range(10, 60)]
+    public int ServerStepCountPerFrame = 15;
     public int MaxPlayers = 10;
     public int MaxPeers => MaxPlayers * 2;
     public int MaxChannels = 10;
     
-    public LFloat StepIntervalMS => LFloat.one / new LFloat(true, StepCountPerFrame * 1000);
+    //public LFloat ClientStepIntervalMS => LFloat.one / new LFloat(true, ClientStepDeltaTime * 1000);
 
     private float m_LastServerStepTime;
-    public float ServerStepInterval => 1.0f / StepCountPerFrame;
+    public float ServerStepInterval => 1.0f / ServerStepCountPerFrame;
     private Host m_Host;
 
     private Client m_Client;

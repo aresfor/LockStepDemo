@@ -44,7 +44,8 @@ public class Client
 
     //@TODO：封装到房间中
     public PlayerServerInfo[] PlayerServerInfos;
-    public Player[] Players;
+    public List<Player> Players => (GameEntry.Instance.ServiceContainer.GetService<IGameStateService>() as GameStateService)?.GetPlayers();
+    public int PlayerCount => PlayerServerInfos.Length;
     
     //public List<FrameInput> Frames = new List<FrameInput>();
     
@@ -150,13 +151,18 @@ public class Client
     {
         if (false == m_GameStarted)
             return;
+        //没有收到服务器帧信息，直接返回
+        if (m_GameStartTimestampMs < 0)
+        {
+            return;
+        }
         
         m_TickSinceGameStart =
             (int) ((LTime.realtimeSinceStartupMS - m_GameStartTimestampMs)
-                   / GameEntry.Instance.StepCountPerFrame);
+                   / GameEntry.Instance.ClientStepDeltaTime);
 
+        Debug.LogError($"当前帧: {m_TickSinceGameStart}, 当前world帧: {GameEntry.CurrentTick}");
         m_FrameBuffer.OnUpdate(deltaTime, GameEntry.CurrentTick);
-        
         
         if (GameEntry.Instance.IsClientMode)
         {
@@ -176,19 +182,17 @@ public class Client
     private void SendInputs(int tick)
     {
         //@TODO: pool
-        Msg_FrameInput msgframeInput = new Msg_FrameInput()
+        Msg_FrameInput msgFrameInput = new Msg_FrameInput()
         {
             Input = new FrameInput()
             {
-                inputs = new[]
-                {
-                    GameEntry.CurrentGameInput.Clone()
-                },
+                inputs = new PlayerInput[PlayerCount],
                 tick = tick
             }
         };
+        msgFrameInput.Input.inputs[m_LocalPlayerId] = GameEntry.CurrentGameInput.Clone();
 
-        StepFrame stepFrame = new StepFrame(msgframeInput);
+        StepFrame stepFrame = new StepFrame(msgFrameInput);
         FillInputWithLastFrame(stepFrame);
         m_FrameBuffer.EnqueueLocalFrame(stepFrame);
         
@@ -204,12 +208,19 @@ public class Client
     public void FillInputWithLastFrame(StepFrame stepFrame)
     {
         int tick = stepFrame.Tick;
-        StepFrame lastFrame = tick == 0? null :m_FrameBuffer.GetFrame(tick - 1);
+        Msg_FrameInput lastFrameInput = tick == 0? null :m_FrameBuffer.GetFrame(tick - 1)?.FrameInput;
         PlayerInput localPlayerInput = stepFrame.FrameInput.Input.inputs[m_LocalPlayerId];
-        for (int i = 0; i < Players.Length; ++i)
+        for (int i = 0; i < PlayerCount; ++i)
         {
-            stepFrame.FrameInput.Input.inputs[i] = lastFrame != null? lastFrame.FrameInput.Input.inputs[i].Clone()
-                    : new PlayerInput();
+            if (lastFrameInput == null || lastFrameInput.Input == null)
+            {
+                stepFrame.FrameInput.Input.inputs[i] = null;
+                continue;
+            }
+
+            PlayerInput lastPlayerInput = lastFrameInput.Input.inputs.Length > i && lastFrameInput.Input.inputs[i] != null
+                ? lastFrameInput.Input.inputs[i].Clone() : new PlayerInput();
+            stepFrame.FrameInput.Input.inputs[i] = lastPlayerInput;
         }
 
         stepFrame.FrameInput.Input.inputs[m_LocalPlayerId] = localPlayerInput;
@@ -232,10 +243,11 @@ public class Client
             {
                 Input = new FrameInput()
                 {
-                    inputs = new[] { msgPlayerInput.PlayerInput },
+                    inputs = new PlayerInput[PlayerCount],
                     tick = GameEntry.CurrentTick
                 }
             };
+            msgFrameInput.Input.inputs[m_LocalPlayerId] = GameEntry.CurrentGameInput.Clone();
 
             StepFrame stepFrame = new StepFrame(msgFrameInput);
             m_FrameBuffer.EnqueueLocalFrame(stepFrame);
@@ -254,8 +266,9 @@ public class Client
 
         //如果超过了预测最大帧数，不step
         //目前MaxPredictFrameCount：30
-        while (GameEntry.CurrentTick > m_FrameBuffer.MaxPredictFrameCount)
+        while (GameEntry.CurrentTick - m_FrameBuffer.MaxContinueServerTick > m_FrameBuffer.MaxPredictFrameCount)
         {
+            //@TODO: 重连?
             return;
         }
 
@@ -272,7 +285,7 @@ public class Client
                 return;
             }
             
-            m_FrameBuffer.EnqueueServerFrame(serverFrame);
+            m_FrameBuffer.EnqueueLocalFrame(serverFrame);
             Step(serverFrame, GameEntry.CurrentTick == minTickToBackup);
             if (LTime.realtimeSinceStartupMS > deadline && GameEntry.CurrentTick < maxServerTickInBuffer)
             {
@@ -289,7 +302,7 @@ public class Client
 
         if (m_FrameBuffer.IsNeedRollback)
         {
-            RollbackTo(GameEntry.CurrentTick);
+            RollbackTo(m_FrameBuffer.NextTickToCheck);
             //@TODO: 验证哈希，清理哈希
             //@TODO: 重新计算下次快照保存时间
             minTickToBackup = Mathf.Min(GameEntry.CurrentTick, minTickToBackup);
@@ -315,10 +328,11 @@ public class Client
                 {
                     Input = new FrameInput()
                     {
-                        inputs = new[] { GameEntry.CurrentGameInput },
+                        inputs = new PlayerInput[PlayerCount],
                         tick = GameEntry.CurrentTick
                     }
                 };
+                msgFrameInput.Input.inputs[m_LocalPlayerId] = GameEntry.CurrentGameInput.Clone();
                 predictLocalStepFrame = new StepFrame(msgFrameInput);
                 m_FrameBuffer.EnqueueLocalFrame(predictLocalStepFrame);
             }
@@ -405,7 +419,7 @@ public class Client
                 return;
             }
             PlayerInput playerBufferInput = stepFrame.FrameInput.Input.inputs[i];
-            Players[i].Input = playerBufferInput.Clone();
+            Players[i].Input = playerBufferInput != null ?playerBufferInput.Clone(): null;
         }
     }
     
@@ -418,8 +432,8 @@ public class Client
         GameEntry.Instance.ServiceContainer.Backup(GameEntry.CurrentTick);
         //@TODO: 状态日志
         
-        StepInternal(stepFrame);
         FillPlayerInputs(stepFrame);
+        StepInternal(stepFrame);
         m_FrameBuffer.SetNextClientTick(GameEntry.CurrentTick + 1);
 
         ++GameEntry.CurrentTick;
@@ -481,10 +495,21 @@ public class Client
 
     private void StepInternal(StepFrame stepFrame)
     {
-        LFloat deltaTime = new LFloat(true, GameEntry.Instance.StepIntervalMS._val);
+        LFloat deltaTime = new LFloat(true, GameEntry.Instance.ClientStepDeltaTime);
 
         foreach (var player in Players)
         {
+            if (player.Input == null)
+                continue;
+            
+            Debug.LogError($"StepPlayer, tick: {stepFrame.Tick}" +
+                           $", worldTick: {GameEntry.CurrentTick}" +
+                           $", maxservertickinbuffer: {m_FrameBuffer.MaxServerTickInBuffer}" +
+                           $", maxservercontinuetick:{m_FrameBuffer.MaxContinueServerTick}" +
+                           $", servertick: {m_FrameBuffer.CurrentTickInServer}" +
+                           $", input: {player.Input.InputUV}" +
+                           $", old position: {player.Position}" +
+                           $", old go Position: {player.Go.transform.position}");
             var uv = player.Input.InputUV;
             player.Position += new LVector3(uv.x,LFloat.zero, uv.y) * deltaTime;
             player.Go.transform.position = player.Position.ToVector3();
@@ -528,7 +553,6 @@ public class Client
         });
 
         GameEntry.Instance.Tick2SendTimer[InputTick] = Time.realtimeSinceStartup;
-        ++InputTick;
     }
 
     public void StartGame(IMessage message)
@@ -549,23 +573,33 @@ public class Client
 
     public void StartGameInternal()
     {
+        if (m_GameStarted)
+        {
+            Debug.LogError("GameStart call twice! check!");
+            return;
+        }
         m_GameStarted = true;
         
-        Players = new Player[PlayerServerInfos.Length];
-        for(int i = 0;i<PlayerServerInfos.Length;++i)
-        {
-            Players[i] = new Player()
-            {
-                LocalId = PlayerServerInfos[i].localId
-            };
-        }
+        // for(int i = 0;i<PlayerServerInfos.Length;++i)
+        // {
+        //     Players[i] = new Player()
+        //     {
+        //         LocalId = PlayerServerInfos[i].localId;
+        //     };
+        // }
         
         //生成实体
-        for (int i = 0; i < Players.Length; ++i)
+        for (int i = 0; i < PlayerCount; ++i)
         {
+            var playerServerInfo = PlayerServerInfos[i];
+            
+            var playerEntity = GameEntry.Instance.ServiceContainer.GetService<IGameStateService>()
+                .CreateEntity<Player>(playerServerInfo.PrefabId, playerServerInfo.initPos, playerServerInfo.initDeg);
+            
             var newPlayerGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            newPlayerGo.name = "Player_" + Players[i].LocalId.ToString();
-            Players[i].Go = newPlayerGo;
+            playerEntity.Go = newPlayerGo;
+            playerEntity.LocalId = playerServerInfo.localId;
+            newPlayerGo.name = "Player_" + playerEntity.LocalId;
         }
         
         //@TODO: 本地模式实际上应该是模型加载完，关卡加载完之后再初始化时间

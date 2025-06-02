@@ -18,6 +18,21 @@
         private Dictionary<int, Serializer> m_Tick2Backup = new Dictionary<int, Serializer>();
 
 
+        public override int GetHash(ref int index)
+        {
+            int hash = 1;
+            foreach (var entity in GetPlayers()) 
+            {
+                hash += entity.Position.GetHash(ref index) * PrimerLUT.GetPrimer(index++);
+                hash += entity.Euler.GetHash(ref index) * PrimerLUT.GetPrimer(index++);
+               
+                Debug.LogError($"id: {entity.LocalId}, go:{entity.Go}, PlayerPosition: {entity.Position}, GoPosition: {entity.Go.transform.position}");
+            }
+
+            hash += m_GameState.GetHash(ref index) * PrimerLUT.GetPrimer(index++);
+            return hash;
+        }
+
         #region Entity接口
         
         private void AddEntity<T>(T e) where T : Entity{
@@ -71,12 +86,12 @@
             return null;
         }
 
-        public Player[] GetPlayers(){
-            return GetEntities<Player>().ToArray();
+        public List<Player> GetPlayers(){
+            return GetEntities<Player>();
         }
         
         public T CreateEntity<T>(int prefabId, LVector3 position, LVector3 euler) where T : Entity, new(){
-            Debug.Log($"CreateEntity {prefabId} pos {prefabId}");
+            Debug.Log($"CreateEntity {prefabId} pos {position}");
             var baseEntity = new T();
             //@TODO: entity config
             //_gameConfigService.GetEntityConfig(prefabId)?.CopyTo(baseEntity);
@@ -85,9 +100,10 @@
             // baseEntity.GameStateService = _gameStateService;
             // baseEntity.ServiceContainer = _serviceContainer;
             baseEntity.Position = position;
+            baseEntity.Euler = euler;
             
             //@TODO: bingref
-            //baseEntity.DoBindRef();
+            baseEntity.DoBindRef();
             
             // if (baseEntity is Entity entity) {
             //     PhysicSystem.Instance.RegisterEntity(prefabId, entity);
@@ -150,7 +166,7 @@
                 foreach (var entity in m_Id2Entities.Values) {
                     // entity.GameStateService = _gameStateService;
                     // entity.ServiceContainer = _serviceContainer;
-                    // entity.DoBindRef();
+                    entity.DoBindRef();
                 }
 
                 //@TODO:
@@ -164,6 +180,11 @@
                     
                     //_gameViewService.BindView(pair.Value, oldEntity);
                 }
+                
+                foreach (var entity in m_Id2Entities.Values) {
+                    entity.AfterSerialize();
+                }
+                
                 
                 //@TODO: 
                 //. Unbind Entity views
@@ -182,8 +203,8 @@
             base.Clear(currentTick, targetTick);
         }
 
-        void BackUpEntities<T>(T[] lst, Serializer writer) where T : Entity, new(){
-            writer.Write(lst.Length);
+        void BackUpEntities<T>(List<T> lst, Serializer writer) where T : Entity, new(){
+            writer.Write(lst.Count);
             foreach (var item in lst) {
                 item.Write(writer);
             }

@@ -10,6 +10,7 @@
     {
         private Server m_Server;
         private int m_ConnectedPlayerCount = 0;
+        
         //public int CurrentClientPeerID;
         public ServerCommandHandler(Server server)
         {
@@ -31,7 +32,7 @@
             m_Server.Id2ConnectedPeers.Add(peer.ID, peer);
 
             m_Server.Id2PlayerInfos.Add(peer.ID, new PlayerServerInfo(peer.ID
-                , new LFloat()
+                , new LVector3()
                 , new LVector3()));
             
             //@TODO: 

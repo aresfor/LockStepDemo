@@ -7,7 +7,7 @@ using UnityEngine;
 using UnityEngine.Serialization;
 
 [Serializable]
-public class PlayerInput:BaseFormater
+public class PlayerInput:BaseFormater, IEquatable<PlayerInput>
 {
     public LVector2 MousePos;
     public LVector2 InputUV;
@@ -35,5 +35,30 @@ public class PlayerInput:BaseFormater
             IsSprint = this.IsSprint,
             IsFire = this.IsFire,
         };
+    }
+
+    public override string ToString()
+    {
+        return $"MousePos: {MousePos}, InputUV: {InputUV}, IsSprint: {IsSprint}， IsFire: {IsFire}";
+    }
+
+    public bool Equals(PlayerInput other)
+    {
+        if (ReferenceEquals(null, other)) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return MousePos.Equals(other.MousePos) && InputUV.Equals(other.InputUV) && IsSprint == other.IsSprint && IsFire == other.IsFire;
+    }
+
+    public override bool Equals(object obj)
+    {
+        if (ReferenceEquals(null, obj)) return false;
+        if (ReferenceEquals(this, obj)) return true;
+        if (obj.GetType() != this.GetType()) return false;
+        return Equals((PlayerInput)obj);
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(MousePos, InputUV, IsSprint, IsFire);
     }
 }

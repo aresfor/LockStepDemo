@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Lockstep.Serialization;
 
 public enum EMessageType : ushort
@@ -44,7 +45,7 @@ public class Msg_PlayerInput:BaseFormater, IMessage
     }
 }
 
-public class Msg_FrameInput :BaseFormater,  IMessage
+public class Msg_FrameInput :BaseFormater,  IMessage, IEquatable<Msg_FrameInput>
 {
     public ushort OpCode { get; set; } = (ushort)EMessageType.FrameInput;
     public ushort Size { get; set; }
@@ -59,6 +60,31 @@ public class Msg_FrameInput :BaseFormater,  IMessage
     public override void Deserialize(Deserializer reader)
     {
         Input = reader.ReadRef(ref Input);
+    }
+
+    public override string ToString()
+    {
+        return Input.ToString();
+    }
+
+    public bool Equals(Msg_FrameInput other)
+    {
+        if (ReferenceEquals(null, other)) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Equals(Input, other.Input);
+    }
+
+    public override bool Equals(object obj)
+    {
+        if (ReferenceEquals(null, obj)) return false;
+        if (ReferenceEquals(this, obj)) return true;
+        if (obj.GetType() != this.GetType()) return false;
+        return Equals((Msg_FrameInput)obj);
+    }
+
+    public override int GetHashCode()
+    {
+        return (Input != null ? Input.GetHashCode() : 0);
     }
 }
 

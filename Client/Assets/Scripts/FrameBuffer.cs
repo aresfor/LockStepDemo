@@ -95,6 +95,7 @@ public class FrameBuffer
     
     public void EnqueueLocalFrame(StepFrame stepFrame)
     {
+        Debug.LogError($"EnqueueLocalFrame: {stepFrame.Tick}, inputLength: {stepFrame.FrameInput.Input.inputs.Length}");
         int frameIndex = stepFrame.Tick % Capacity;
         if (m_LocalFrames[frameIndex] != null 
             && m_LocalFrames[frameIndex].Tick > stepFrame.Tick)
@@ -107,6 +108,7 @@ public class FrameBuffer
     
     public void EnqueueServerFrame(StepFrame serverFrame)
     {
+        Debug.LogError($"EnqueueServerFrame: {serverFrame.Tick}, input: {serverFrame.FrameInput.Input.inputs}");
         //延迟打印
         if (GameEntry.Instance.Tick2SendTimer.TryGetValue(serverFrame.Tick, out var sendTick)) {
             GameEntry.Delays.Add(Time.realtimeSinceStartup - sendTick);
@@ -134,7 +136,11 @@ public class FrameBuffer
             MaxServerTickInBuffer = serverFrame.Tick;
         }
         
-        
+        int targetIndex = serverFrame.Tick % Capacity;
+        if (m_ServerFrames[targetIndex] == null || m_ServerFrames[targetIndex].Tick != serverFrame.Tick)
+        {
+            m_ServerFrames[targetIndex] = serverFrame;
+        }
     }
     public void OnUpdate(float deltaTime, int worldTick)
     {
@@ -142,6 +148,7 @@ public class FrameBuffer
 
         
         IsNeedRollback = false;
+        //NextTickToCheck不能大于等于world tick， 否则本帧还没更新就会进行回滚
         while (NextTickToCheck <= MaxServerTickInBuffer && NextTickToCheck < worldTick)
         {
             int frameIndex = NextTickToCheck % Capacity;
@@ -172,12 +179,15 @@ public class FrameBuffer
                 break;
             }
 
-            if (ReferenceEquals(serverFrame, localFrame) || serverFrame == localFrame)
+            if (serverFrame.Equals(localFrame))
             {
                 ++NextTickToCheck;
             }
             else
             {
+                Debug.LogError($"FrameBufferUpdate: NeedRollback" +
+                               $", serverFrame: {serverFrame.ToString()}" +
+                               $", localFrame: {localFrame.ToString()}");
                 IsNeedRollback = true;
                 break;
             }
@@ -185,9 +195,17 @@ public class FrameBuffer
         }
         
         
-        //@TODO:!!!! 目前是否是保序的？如果不是，需要确认有哪些帧已经收到了，请求未接受到的帧
 
-        MaxContinueServerTick = NextTickToCheck - 1;
+        int tick = NextTickToCheck;
+        for (; tick <= MaxServerTickInBuffer; tick++) {
+            var index = tick % Capacity;
+            if (m_ServerFrames[index] == null || m_ServerFrames[index].Tick != tick) {
+                break;
+            }
+        }
+        
+        MaxContinueServerTick = tick - 1;
+        //@TODO:!!!! 目前是否是保序的？如果不是，需要确认有哪些帧已经收到了，请求未接受到的帧
 
 
     }

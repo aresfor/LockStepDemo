@@ -54,6 +54,7 @@ public class Server
     public float _gameStartTimestampMs = -1;
 
     private int m_CurrentTick;
+    private int m_DelayTick = 2;
     
 
     #endregion
@@ -125,29 +126,40 @@ public class Server
     {
         Debug.Log("Server StartGame");
         m_GameStarted = true;
+        //延迟启动
+        //m_CurrentTick = -1 * m_DelayTick;
 
-        Msg_StartGame msgStartGame = message as Msg_StartGame;
-        //@TODO:
-        msgStartGame.mapId = 0;
-        msgStartGame.playerInfos = Id2PlayerInfos.Values.ToArray();
-
-        var bytes = msgStartGame.ToBytes();
-        
-        Debug.Log($"Server broadcast startGame, size(totalSize - 4): {bytes.Length}");
-
-        int playerLocalId = 0;
+        int playerLocalId = -1;
         foreach (var playerServerInfo in Id2PlayerInfos.Values)
         {
-            //@TODO:
             ++playerLocalId;
-            msgStartGame.localPlayerId = playerLocalId; 
-            var newPtr = MessagePacker.Instance.GetBytesPtr(msgStartGame.OpCode, bytes, out var totalLength);
 
+            playerServerInfo.localId = playerLocalId;
+        }
+        
+
+        Msg_StartGame msgStartGame = message as Msg_StartGame;
+        msgStartGame.mapId = 0;
+        //@TODO:
+        msgStartGame.playerInfos = Id2PlayerInfos.Values.ToArray();
+        
+        foreach (var playerServerInfo in Id2PlayerInfos.Values)
+        {
+            
+            //@TODO:
+            msgStartGame.localPlayerId = playerServerInfo.localId;
+            
+            byte[] bytes = msgStartGame.ToBytes();
+            
+            Debug.LogError($"Server broadcast startGame to peerID: {playerServerInfo.id}, localId: {playerServerInfo.localId}, size(totalSize - 4): {bytes.Length}");
+            
+            var newPtr = MessagePacker.Instance.GetBytesPtr(msgStartGame.OpCode, bytes, out var totalLength);
+            
             FSendData sendData = new FSendData()
             {
                 Data = newPtr,
                 Length = totalLength,
-                Peer = sendData.Peer = Id2ConnectedPeers[playerServerInfo.id]
+                Peer = Id2ConnectedPeers[playerServerInfo.id]
             };
             EnqueueSendData(sendData);
         }
@@ -169,7 +181,8 @@ public class Server
             m_Tick2Inputs.Add(msgPlayerInput.Tick, playerInputs);
         }
 
-        playerInputs[playerInfo.id] = msgPlayerInput.PlayerInput;
+        //@TODO:localid
+        playerInputs[playerInfo.localId] = msgPlayerInput.PlayerInput;
         CheckInput(false);
     }
 
@@ -206,7 +219,7 @@ public class Server
 
         if (false == checkPass)
         {
-            Debug.Log(msgPlayerHash.Tick + " Hash is different " + compareValue);
+            Debug.LogError(msgPlayerHash.Tick + " Hash is different " + compareValue);
         }
 
         m_Tick2Hashes.Remove(msgPlayerHash.Tick);
@@ -285,7 +298,8 @@ public class Server
         if (false == m_GameStarted)
             return;
         
-        while (m_CurrentTick < _tickSinceGameStart)
+        //startTime不等于表示还没有收到任一一个玩家输入
+        while (_gameStartTimestampMs > 0 && m_CurrentTick < _tickSinceGameStart)
         {
             CheckInput(true);
         }
@@ -296,6 +310,9 @@ public class Server
         if (false == m_GameStarted)
             return;
 
+        
+        
+        
         PlayerInput[] playerInputs = null;
         if (false == m_Tick2Inputs.ContainsKey(m_CurrentTick))
         {
@@ -326,23 +343,16 @@ public class Server
         m_Tick2Inputs.Remove(m_CurrentTick);
         ++m_CurrentTick;
 
+        if (_gameFirstFrameTimeStamp < 0) {
+            _gameFirstFrameTimeStamp = Time.time;
+        }
+        
         //if (isFullInput)
         // {
         //     BoardInputMsg(m_CurrentTick, playerInputs);
         //     m_Tick2Inputs.Remove(m_CurrentTick);
         //     ++m_CurrentTick;
         // }
-
-        
-        if (_gameFirstFrameTimeStamp <= 0) {
-            _gameFirstFrameTimeStamp = Time.time;
-        }
-
-        if (_gameStartTimestampMs < 0)
-        {
-            _gameStartTimestampMs = Time.time;
-        }
-        
         
     }
     private void BoardInputMsg(int tick, PlayerInput[] inputs){

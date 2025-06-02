@@ -25,7 +25,14 @@
         {
         }
 
-
+        public virtual void DoBindRef()
+        {
+            
+        }
+        public virtual void AfterSerialize()
+        {
+            
+        }
         public virtual void Write(Serializer writer)
         {
             writer.Write(EntityId);
@@ -39,4 +46,6 @@
             Position = reader.ReadLVector3();
             Euler = reader.ReadLVector3();
         }
+
+        
     }

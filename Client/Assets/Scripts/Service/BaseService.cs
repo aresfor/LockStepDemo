@@ -9,7 +9,8 @@
         public virtual void DoStart(){ }
         public virtual void DoDestroy(){ }
         public virtual void OnApplicationQuit(){ }
-        public virtual int GetHash(ref int idx){return 0;}
+
+        public abstract int GetHash(ref int idx);
 
         protected CommandBuffer cmdBuffer;
         
@@ -36,9 +37,5 @@
             cmdBuffer?.Clean(targetTick);
 
         }
-
-        public virtual int GetHashCode(ref int index)
-        {
-            return 0;
-        }
+        
     }
