@@ -3,7 +3,7 @@
     using Lockstep.Serialization;
     using UnityEngine;
 
-    public class Entity:IEntity,IEntityState
+    public class TempEntity:ITempEntity,IEntityState
     {
         public int EntityId { get; set; }
         public LVector3 Position;

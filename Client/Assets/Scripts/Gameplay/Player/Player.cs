@@ -4,7 +4,7 @@ using Lockstep.Math;
 using Lockstep.Serialization;
 using UnityEngine;
 
-public class Player:Entity
+public class Player:TempEntity
 {
     public int LocalId;
 

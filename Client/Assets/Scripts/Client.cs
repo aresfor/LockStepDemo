@@ -68,7 +68,9 @@ public class Client
     public int SnapShotFrameInterval = 1;
 
     #endregion
-    
+
+
+    private World m_World;
     public Client()
     {
         m_CommandHandler = new ClientCommandHandler(this);
@@ -89,6 +91,17 @@ public class Client
         m_NetThread = new Thread(NetworkThread);
         m_NetThread.Start();
 
+        m_World = new World("ClientWorld");
+        Feature feature = new Feature("ClientWorldFeature");
+
+        feature.Add(new ViewSystem(m_World));
+        feature.Add(new MovementSystem(m_World));
+        feature.Add(new PlayerSpawnSystem(m_World));
+        ServiceContainer serviceContainer = new ServiceContainer();
+        serviceContainer.RegisterService<IIdService, IdService>(new IdService());
+        serviceContainer.RegisterService<IGameStateService, GameStateService>(new GameStateService());
+        m_World.Initialize(feature, serviceContainer, ENetMode.Client);
+        
         return m_NetThread;
     }
 

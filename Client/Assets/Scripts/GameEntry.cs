@@ -55,10 +55,6 @@ public partial class GameEntry : MonoBehaviour
     #endregion
     
     public string RecordFilePath;
-
-    
-    public List<PlayerServerInfo> PlayerServerInfos = new List<PlayerServerInfo>();
-    
     
     public Dictionary<int, float> Tick2SendTimer = new Dictionary<int, float>();
 

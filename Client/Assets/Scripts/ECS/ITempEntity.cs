@@ -1,7 +1,7 @@
 ﻿
     using ECS;
 
-    public interface IEntity: ILifetime
+    public interface ITempEntity: ILifetime
     {
         public int EntityId { get; }
 

@@ -13,7 +13,7 @@
 
         private Dictionary<Type, IList> m_Type2Entities = new Dictionary<Type, IList>();
         
-        private Dictionary<int, Entity> m_Id2Entities = new Dictionary<int, Entity>();
+        private Dictionary<int, TempEntity> m_Id2Entities = new Dictionary<int, TempEntity>();
                 
         private Dictionary<int, Serializer> m_Tick2Backup = new Dictionary<int, Serializer>();
 
@@ -35,7 +35,7 @@
 
         #region Entity接口
         
-        private void AddEntity<T>(T e) where T : Entity{
+        private void AddEntity<T>(T e) where T : TempEntity{
             if (typeof(T) == typeof(Player)) {
                 int i = 0;
                 Debug.Log("Add Player");
@@ -55,7 +55,7 @@
             m_Id2Entities[e.EntityId] = e;
         }
 
-        private void RemoveEntity<T>(T e) where T : Entity{
+        private void RemoveEntity<T>(T e) where T : TempEntity{
             var t = e.GetType();
             if (m_Type2Entities.TryGetValue(t, out var lstObj)) {
                 lstObj.Remove(e);
@@ -90,7 +90,7 @@
             return GetEntities<Player>();
         }
         
-        public T CreateEntity<T>(int prefabId, LVector3 position, LVector3 euler) where T : Entity, new(){
+        public T CreateEntity<T>(int prefabId, LVector3 position, LVector3 euler) where T : TempEntity, new(){
             Debug.Log($"CreateEntity {prefabId} pos {position}");
             var baseEntity = new T();
             //@TODO: entity config
@@ -118,7 +118,7 @@
             return baseEntity;
         }
 
-        public void DestroyEntity(Entity entity){
+        public void DestroyEntity(TempEntity entity){
             RemoveEntity(entity);
         }
 
@@ -153,7 +153,7 @@
                 GameEntry.Instance.CurrentHash = hash;
 
                 var oldId2Entity = m_Id2Entities;
-                m_Id2Entities = new Dictionary<int, Entity>();
+                m_Id2Entities = new Dictionary<int, TempEntity>();
                 m_Type2Entities.Clear();
 
                 //. Recover Entities
@@ -172,7 +172,7 @@
                 //@TODO:
                 //. Rebind Views 
                 foreach (var pair in m_Id2Entities) {
-                    Entity oldEntity = null;
+                    TempEntity oldEntity = null;
                     if (oldId2Entity.TryGetValue(pair.Key, out var poldEntity)) {
                         oldEntity = poldEntity;
                         oldId2Entity.Remove(pair.Key);
@@ -203,14 +203,14 @@
             base.Clear(currentTick, targetTick);
         }
 
-        void BackUpEntities<T>(List<T> lst, Serializer writer) where T : Entity, new(){
+        void BackUpEntities<T>(List<T> lst, Serializer writer) where T : TempEntity, new(){
             writer.Write(lst.Count);
             foreach (var item in lst) {
                 item.Write(writer);
             }
         }
 
-        List<T> RecoverEntities<T>(List<T> lst, Deserializer reader) where T : Entity, new(){
+        List<T> RecoverEntities<T>(List<T> lst, Deserializer reader) where T : TempEntity, new(){
             var count = reader.ReadInt32();
             for (int i = 0; i < count; i++) {
                 var t = new T();

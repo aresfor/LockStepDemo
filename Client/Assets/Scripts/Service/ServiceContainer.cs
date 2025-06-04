@@ -4,12 +4,12 @@
     using System.Linq;
     using UnityEngine;
 
-    public class ServiceContainer:IServiceContainer
+    public class ServiceContainer:IServiceContainer, IUpdateService, IExecuteService
     {
-        private Dictionary<Type, IService> m_Services = new Dictionary<Type, IService>();
-
-        private bool m_Dirty = false;
         private List<IService> m_CachedAllServices;
+        private readonly Dictionary<Type, IService> m_Services = new Dictionary<Type, IService>();
+        private List<IUpdateService> m_CachedUpdateServices = new List<IUpdateService>();
+        private List<IExecuteService> m_CachedExecuteServices = new List<IExecuteService>();
         public void RegisterService<T, TV>(TV service) where T : class, IService where TV : T
         {
             if (m_Services.ContainsKey(typeof(T)))
@@ -17,18 +17,24 @@
                 Debug.LogError($"ReRegister service: {typeof(T)}");
                 return;
             }
-
-            m_Dirty = true;
+            
             m_Services[typeof(T)] = service;
+            if (service is IUpdateService updateService)
+            {
+                m_CachedUpdateServices.Add(updateService);
+            }
 
+            if (service is IExecuteService executeService)
+            {
+                m_CachedExecuteServices.Add(executeService);
+            }
         }
 
         public List<IService> GetAllService()
         {
-            if (m_Dirty || null == m_CachedAllServices)
+            if (null == m_CachedAllServices)
             {
                 m_CachedAllServices = m_Services.Values.ToList();
-                m_Dirty = false;
             }
             return m_CachedAllServices;
         }
@@ -67,5 +73,15 @@
             {
                 service.Clear(currentTick, targetTick);
             }
+        }
+
+        public void OnUpdate(float deltaTime)
+        {
+            m_CachedUpdateServices.ForEach(service => service.OnUpdate(deltaTime));
+        }
+
+        public void OnExecute(float deltaTime)
+        {
+            m_CachedExecuteServices.ForEach(service => service.OnExecute(deltaTime));
         }
     }
