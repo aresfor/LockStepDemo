@@ -91,8 +91,8 @@ namespace Entitas.Unity.Editor {
         public static string SearchTextField(string searchString) {
             var guiChanged = GUI.changed;
             GUILayout.BeginHorizontal();
-            searchString = GUILayout.TextField(searchString, GUI.skin.FindStyle("ToolbarSeachTextField"));
-            if (GUILayout.Button(string.Empty, GUI.skin.FindStyle("ToolbarSeachCancelButton"))) {
+            searchString = GUILayout.TextField(searchString, GUI.skin.FindStyle("ToolbarSearchTextField"));
+            if (GUILayout.Button(string.Empty, GUI.skin.FindStyle("ToolbarSearchCancelButton"))) {
                 searchString = string.Empty;
             }
             GUILayout.EndHorizontal();
