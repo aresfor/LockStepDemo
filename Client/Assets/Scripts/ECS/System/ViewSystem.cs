@@ -12,7 +12,7 @@ public class ViewSystem : ReactiveSystem
     public ViewSystem(World world) : base(world)
     {
         // new API, add monitor that watch Position changed and call Process 
-        monitors += Context<Default>.AllOf<PositionComponent>().OnAdded(Process);
+        monitors += Context<Game>.AllOf<PositionComponent>().OnAdded(Process);
     }
 
     protected void Process(List<Entitas.Entity> entities)

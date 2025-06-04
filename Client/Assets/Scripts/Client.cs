@@ -94,9 +94,10 @@ public class Client
         m_World = new World("ClientWorld");
         Feature feature = new Feature("ClientWorldFeature");
 
-        feature.Add(new ViewSystem(m_World));
-        feature.Add(new MovementSystem(m_World));
-        feature.Add(new PlayerSpawnSystem(m_World));
+        feature.Add(new ViewSystem(m_World))
+            .Add(new MovementSystem(m_World))
+            .Add(new PlayerSpawnSystem(m_World));
+        feature.Initialize();
         ServiceContainer serviceContainer = new ServiceContainer();
         serviceContainer.RegisterService<IIdService, IdService>(new IdService());
         serviceContainer.RegisterService<IGameStateService, GameStateService>(new GameStateService());

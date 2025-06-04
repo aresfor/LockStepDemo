@@ -35,8 +35,10 @@ public class World
     public bool IsListenServer => NetMode == ENetMode.Server;
     public bool IsClient => NetMode == ENetMode.Client;
 
-    public T GetUniqueComponent<T>() where T : IComponent, IUnique => Contexts.defaultContext.GetUnique<T>();
-    public Entity GetSingletonEntity<T>() where T : IComponent, IUnique => Contexts.defaultContext.GetSingleEntity<T>();
+    public T GetUniqueComponent<C,T>()where C:ContextAttribute
+        where T : IComponent, IUnique => Contexts.GetContext<C>().GetUnique<T>();
+    public Entity GetSingletonEntity<C,T>() where C:ContextAttribute
+        where T : IComponent, IUnique => Contexts.GetContext<C>().GetSingleEntity<T>();
 
     public Entity CreateEntity<C>(EEntityArchetype archetype, EntitySpawnParameter spawnParameter) where C : ContextAttribute =>
         m_EntityManager.CreateEntity<C>(archetype, spawnParameter);

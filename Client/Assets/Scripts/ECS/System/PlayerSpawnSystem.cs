@@ -7,7 +7,7 @@ public class PlayerSpawnSystem : SystemBase, IExecuteSystem
 
     public PlayerSpawnSystem(World world) : base(world)
     {
-        m_PlayerLifetimeComponent = world.GetUniqueComponent<PlayerLifetimeComponent>();
+        m_PlayerLifetimeComponent = world.GetUniqueComponent<Game,PlayerLifetimeComponent>();
     }
 
     //@TODO:每帧生成限制

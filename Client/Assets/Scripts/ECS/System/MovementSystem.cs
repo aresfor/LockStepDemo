@@ -12,7 +12,7 @@ public class MovementSystem : SystemBase, IExecuteSystem
     public void Execute()
     {
         // new API for getting group with all matched entities from context
-        var entities = Context<Default>.AllOf<PositionComponent, VelocityComponent>().GetEntities();
+        var entities = Context<Game>.AllOf<PositionComponent, VelocityComponent>().GetEntities();
 
         foreach (var e in entities)
         {
